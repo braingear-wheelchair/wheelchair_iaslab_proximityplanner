@@ -1,0 +1,7 @@
+<library path="lib/libwheelchair_iaslab_proximityplanner">
+    <class name ="wheelchair_iaslab_proximityplanner/ProximityPlanner" type ="wheelchair_iaslab_proximityplanner::ProximityPlanner" base_class_type= "nav_core::BaseLocalPlanner">
+        <description>
+            Convert the local costmap into a proximity grid for the pf
+        </description>
+    </class>
+</library>
