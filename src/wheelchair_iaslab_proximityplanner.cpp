@@ -295,6 +295,8 @@ void ProximityPlanner::updateObstacleContainerWithCostmap() {
                         current_index++;
                     }
 
+                    current_index--; // This should fix a small bug on the last iteration
+
                     if(cost > costs[current_index]) {
                         costs[current_index] = cost;
 
