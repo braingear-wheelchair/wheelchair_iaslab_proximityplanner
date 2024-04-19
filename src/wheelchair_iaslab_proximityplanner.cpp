@@ -77,26 +77,6 @@ void ProximityPlanner::initialize(std::string name, tf2_ros::Buffer* tf,
     }
 }
 
-// bool ProximityPlanner::configure_proxymity_msg(ros::NodeHandle nh) {
-//     // TODO add a checker if the paramethers here
-//     this->proxymity_msg_ = proximity_grid::ProximityGridMsg();
-// 
-//     nh.param<std::string>("frame_id", this->proxymity_msg_.header.frame_id, "base_link");
-//     nh.param<float>("angle_min",      this->proxymity_msg_.angle_min, -120.0f);
-//     nh.param<float>("angle_max",      this->proxymity_msg_.angle_max,  120.0f);
-//     nh.param<float>("angle_inc",      this->proxymity_msg_.angle_increment,  9.0f);
-//     nh.param<float>("range_min",      this->proxymity_msg_.range_min, 0.0f);
-//     nh.param<float>("range_max",      this->proxymity_msg_.range_max, 6.0f);
-// 
-//     return true;
-// }
-
-//void ProximityPlanner::update_proximity_msg() {
-//    this->proxymity_msg_.header.stamp	= ros::Time::now();
-//    // TODO update the ranges
-//    //  msg.ranges			= grid.GetGrid();
-//}
-
 void ProximityPlanner::samplePlan()
 {
     _global_plan.sampled_global_plan = {};
@@ -146,7 +126,6 @@ bool ProximityPlanner::computeVelocityCommands(geometry_msgs::Twist& cmd_vel)
         geometry_msgs::Point current_goal = _global_plan.sampled_global_plan[_global_plan.current_index].pose.position;
         double distance = getDistanceFromOdometry(current_goal);
 
-
         if(distance < _params.arrival_distance)
         {
             _global_plan.current_index++;
@@ -158,12 +137,8 @@ bool ProximityPlanner::computeVelocityCommands(geometry_msgs::Twist& cmd_vel)
     this->computeAttractorForce();
     this->computeTotalForce();
     this->computeTwist(cmd_vel);
-    /*this->computeRepellorForce();
-    this->computeAttractorForce();
-    this->computeTotalForce();
-    this->computeTwist(cmd_vel);
-
-    this->publishSideInformation();*/
+    
+    //this->publishSideInformation();
 
     return true;
 }
@@ -180,7 +155,6 @@ void ProximityPlanner::resetForces()
 
 void ProximityPlanner::computeTotalForce() {
     this->final_force_ = this->force_repellors_ + this->force_attractors_;
-
     this->final_force_.theta = normalizeAngle(this->final_force_.theta);
 }
 
@@ -192,7 +166,6 @@ void ProximityPlanner::computeAttractorForce() {
     this->force_attractors_.theta = std::atan2(current_objective->y - _current_position.y, current_objective->x - _current_position.x);
 
     this->force_attractors_.theta = this->force_attractors_.theta - _current_position.z;
-
     this->force_attractors_.theta = normalizeAngle(this->force_attractors_.theta);
 
 }

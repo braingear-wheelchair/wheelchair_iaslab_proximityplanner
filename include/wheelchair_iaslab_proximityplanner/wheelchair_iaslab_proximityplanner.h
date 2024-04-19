@@ -23,14 +23,6 @@
 #include <costmap_converter/ObstacleMsg.h>
 #include <costmap_converter/costmap_converter_interface.h>
 
-// Proximity grid msg
-// #include "proximity_grid/ProximityGridMsg.h" // TODO: move this to a laserscan msg
-
-// teb_local_planner related classes
-// #include <teb_local_planner/obstacles.h>
-// #include <teb_local_planner/pose_se2.h>
-// #include <teb_local_planner/robot_footprint_model.h>
-
 #include <cmath>
 #include <limits>
 #include <vector>
@@ -49,14 +41,6 @@ namespace wheelchair_iaslab_proximityplanner{
  **/
 class ProximityPlanner : public nav_core::BaseLocalPlanner
 {
-   /* using ObstContainer    = teb_local_planner::ObstContainer;
-    
-    using ObstaclePtr      = teb_local_planner::ObstaclePtr;
-    using PointObstacle    = teb_local_planner::PointObstacle;
-    using CircularObstacle = teb_local_planner::CircularObstacle;
-    using LineObstacle     = teb_local_planner::LineObstacle;
-    using PolygonObstacle  = teb_local_planner::PolygonObstacle;*/
-    
 public:
 
     ProximityPlanner();
@@ -74,9 +58,6 @@ public:
     float normalizeAngle(float angle);
     
 protected:
-    // void updateObstacleContainerWithCostmapConverter();
-    // void updateObstacleContainerWithCostmap();
-
     double getDisstancePoints(geometry_msgs::Point p1, geometry_msgs::Point p2 );
 
     void updateCurrentPosition();
@@ -107,16 +88,7 @@ private:
 
     double _min_cost;
 
-    //proximity_grid::ProximityGridMsg proxymity_msg_;
-
     bool initialized_ = false;
-
-    // The costmap converter plugin setting
-    //pluginlib::ClassLoader<costmap_converter::BaseCostmapToPolygons> _costmap_converter_loader;  //!< Load costmap converter plugins at runtime
-    //boost::shared_ptr<costmap_converter::BaseCostmapToPolygons> _costmap_converter;              //!< Store the current costmap_converter
-    //costmap_converter::ObstacleArrayMsg _custom_obstacle_msg;                                    //!< Copy of the most recent obstacle message
-
-    //ObstContainer _obstacles;  //!< Obstacle vector that should be considered during local trajectory optimization
 
     struct GlobalPlan // Store the information of the plan
     {
@@ -135,15 +107,6 @@ private:
         double arrival_distance = 0.2;  // [m] the distance from the goal that when it is assumed to be reached
         int sampling_distance = -1;  // the subsapling distance in the array, put -1 to give direct command to mpc 
     } _params;
-
-
-    // struct CostmapConverterPlugin
-    // {
-    //     std::string costmap_converter_plugin;
-    //     double costmap_converter_rate      = 5;
-    //     bool costmap_converter_spin_thread = true;
-    //     
-    // } _costmap_conv_params;
 
     // Parameters for compute the fields
     float vel_angular_min_;
