@@ -24,16 +24,17 @@
 #include <costmap_converter/costmap_converter_interface.h>
 
 // Proximity grid msg
-#include "proximity_grid/ProximityGridMsg.h"
+// #include "proximity_grid/ProximityGridMsg.h" // TODO: move this to a laserscan msg
 
 // teb_local_planner related classes
-#include <teb_local_planner/obstacles.h>
-#include <teb_local_planner/pose_se2.h>
-#include <teb_local_planner/robot_footprint_model.h>
+// #include <teb_local_planner/obstacles.h>
+// #include <teb_local_planner/pose_se2.h>
+// #include <teb_local_planner/robot_footprint_model.h>
 
 #include <cmath>
 #include <limits>
 #include <vector>
+#include <numeric>
 
 using namespace std;
 
@@ -48,13 +49,13 @@ namespace wheelchair_iaslab_proximityplanner{
  **/
 class ProximityPlanner : public nav_core::BaseLocalPlanner
 {
-    using ObstContainer    = teb_local_planner::ObstContainer;
+   /* using ObstContainer    = teb_local_planner::ObstContainer;
     
     using ObstaclePtr      = teb_local_planner::ObstaclePtr;
     using PointObstacle    = teb_local_planner::PointObstacle;
     using CircularObstacle = teb_local_planner::CircularObstacle;
     using LineObstacle     = teb_local_planner::LineObstacle;
-    using PolygonObstacle  = teb_local_planner::PolygonObstacle;
+    using PolygonObstacle  = teb_local_planner::PolygonObstacle;*/
     
 public:
 
@@ -69,10 +70,12 @@ public:
     bool computeVelocityCommands(geometry_msgs::Twist& cmd_vel);
 
     bool isGoalReached();
+
+    float normalizeAngle(float angle);
     
 protected:
-    void updateObstacleContainerWithCostmapConverter();
-    void updateObstacleContainerWithCostmap();
+    // void updateObstacleContainerWithCostmapConverter();
+    // void updateObstacleContainerWithCostmap();
 
     double getDisstancePoints(geometry_msgs::Point p1, geometry_msgs::Point p2 );
 
@@ -89,6 +92,14 @@ protected:
     ros::Publisher proximity_pub_;
 
 private:
+    void resetForces();
+    void computeRepellorForce();
+    void computeAttractorForce();
+    void computeTotalForce();
+    void computeTwist(geometry_msgs::Twist& cmd_vel); 
+    void publishSideInformation();
+
+private:
     costmap_2d::Costmap2DROS*  costmap_ros_;
     costmap_2d::Costmap2D*     _costmap;         //!< Pointer to the 2d costmap (obtained from the costmap ros wrapper)
     geometry_msgs::Point       _current_position;
@@ -96,16 +107,16 @@ private:
 
     double _min_cost;
 
-    proximity_grid::ProximityGridMsg proxymity_msg_;
+    //proximity_grid::ProximityGridMsg proxymity_msg_;
 
     bool initialized_ = false;
 
     // The costmap converter plugin setting
-    pluginlib::ClassLoader<costmap_converter::BaseCostmapToPolygons> _costmap_converter_loader;  //!< Load costmap converter plugins at runtime
-    boost::shared_ptr<costmap_converter::BaseCostmapToPolygons> _costmap_converter;              //!< Store the current costmap_converter
-    costmap_converter::ObstacleArrayMsg _custom_obstacle_msg;                                    //!< Copy of the most recent obstacle message
+    //pluginlib::ClassLoader<costmap_converter::BaseCostmapToPolygons> _costmap_converter_loader;  //!< Load costmap converter plugins at runtime
+    //boost::shared_ptr<costmap_converter::BaseCostmapToPolygons> _costmap_converter;              //!< Store the current costmap_converter
+    //costmap_converter::ObstacleArrayMsg _custom_obstacle_msg;                                    //!< Copy of the most recent obstacle message
 
-    ObstContainer _obstacles;  //!< Obstacle vector that should be considered during local trajectory optimization
+    //ObstContainer _obstacles;  //!< Obstacle vector that should be considered during local trajectory optimization
 
     struct GlobalPlan // Store the information of the plan
     {
@@ -114,24 +125,68 @@ private:
         int current_index = -1;
     } _global_plan;
 
+    geometry_msgs::Point* current_objective;
+
     
     struct Parameters
     {
         std::string odom_topic = "/odom";
-        //std::string mpc_topic  = "/mpc_command";
 
         double arrival_distance = 0.2;  // [m] the distance from the goal that when it is assumed to be reached
         int sampling_distance = -1;  // the subsapling distance in the array, put -1 to give direct command to mpc 
     } _params;
 
 
-    struct CostmapConverterPlugin
-    {
-        std::string costmap_converter_plugin;
-        double costmap_converter_rate      = 5;
-        bool costmap_converter_spin_thread = true;
-        
-    } _costmap_conv_params;
+    // struct CostmapConverterPlugin
+    // {
+    //     std::string costmap_converter_plugin;
+    //     double costmap_converter_rate      = 5;
+    //     bool costmap_converter_spin_thread = true;
+    //     
+    // } _costmap_conv_params;
+
+    // Parameters for compute the fields
+    float vel_angular_min_;
+    float vel_angular_max_;
+    float vel_linear_min_;
+    float vel_linear_max_;
+
+    float range_min_;
+    float range_max_;
+
+    float repellor_angular_strength_;
+    float repellor_angular_decay_;
+
+    std::vector<float> rel_verts_x_;
+    std::vector<float> rel_verts_y_;
+
+    // vector for the forces composed as [intensity, theta]
+     struct Force {
+         float intensity;
+         float theta;
+
+         Force(float intensity = 0.0f, float theta = 0.0f) : intensity(intensity), theta(theta) {}
+
+         Force operator+ (const Force& other) const {
+            std::vector<float> xs = {
+              this->intensity * std::cos(this->theta),
+              other.intensity * std::cos(other.theta)
+            };
+            std::vector<float> ys = {
+              this->intensity * std::sin(this->theta),
+              other.intensity * std::sin(other.theta)
+            };
+
+            float new_x = std::accumulate(xs.begin(), xs.end(), 0.0f);
+            float new_y = std::accumulate(ys.begin(), ys.end(), 0.0f);
+
+            float new_theta = std::atan2(new_y, new_x);
+            float new_intensity = std::sqrt(new_x * new_x + new_y * new_y);
+
+            return Force(new_intensity, new_theta);
+         }
+     } force_repellors_, force_attractors_, final_force_;
+
 
 };
 
