@@ -26,6 +26,7 @@
 #include <cmath>
 #include <limits>
 #include <vector>
+#include <list>
 #include <numeric>
 
 using namespace std;
@@ -80,9 +81,21 @@ private:
     void computeTwist(geometry_msgs::Twist& cmd_vel); 
     void publishSideInformation();
 
+    // Utilities
+    float normalizeVelocity(float vel_a, float v_min, float v_max);
+    void updateInternalMap();
+    void updateRawRepellors();
+    void cleanRawRepellors();
+
 private:
-    costmap_2d::Costmap2DROS*  costmap_ros_;
-    costmap_2d::Costmap2D*     _costmap;         //!< Pointer to the 2d costmap (obtained from the costmap ros wrapper)
+    struct maps_ptrs {
+        costmap_2d::Costmap2DROS*  costmap_ros;
+        costmap_2d::Costmap2D*     costmap; // Pointer to the 2d costmap (obtained from the costmap ros wrapper)
+        unsigned int length_x, length_y;
+        unsigned int center_x, center_y;
+        double resolution;
+    } costmap_;
+
     geometry_msgs::Point       _current_position;
     tf2_ros::Buffer*           tf_;
 
@@ -105,7 +118,7 @@ private:
         std::string odom_topic = "/odom";
 
         double arrival_distance = 0.2;  // [m] the distance from the goal that when it is assumed to be reached
-        int sampling_distance = -1;  // the subsapling distance in the array, put -1 to give direct command to mpc 
+        int sampling_distance = -1;  // the suuubsapling distance in the array, put -1 to give direct command to mpc 
     } _params;
 
     // Parameters for compute the fields
@@ -117,27 +130,32 @@ private:
     float range_min_;
     float range_max_;
 
+    float delta_angle_ = 0.15;
+
     float repellor_angular_strength_;
     float repellor_angular_decay_;
 
     std::vector<float> rel_verts_x_;
     std::vector<float> rel_verts_y_;
 
+    std::vector<float> rel_verts_d_;
+    std::vector<float> rel_verts_theta_;
+
     // vector for the forces composed as [intensity, theta]
-     struct Force {
-         float intensity;
-         float theta;
+    struct Force {
+        float intensity;
+        float theta;
 
-         Force(float intensity = 0.0f, float theta = 0.0f) : intensity(intensity), theta(theta) {}
+        Force(float intensity = 0.0f, float theta = 0.0f) : intensity(intensity), theta(theta) {}
 
-         Force operator+ (const Force& other) const {
+        Force operator+ (const Force& other) const {
             std::vector<float> xs = {
-              this->intensity * std::cos(this->theta),
-              other.intensity * std::cos(other.theta)
+                this->intensity * std::cos(this->theta),
+                other.intensity * std::cos(other.theta)
             };
             std::vector<float> ys = {
-              this->intensity * std::sin(this->theta),
-              other.intensity * std::sin(other.theta)
+                this->intensity * std::sin(this->theta),
+                other.intensity * std::sin(other.theta)
             };
 
             float new_x = std::accumulate(xs.begin(), xs.end(), 0.0f);
@@ -147,8 +165,15 @@ private:
             float new_intensity = std::sqrt(new_x * new_x + new_y * new_y);
 
             return Force(new_intensity, new_theta);
-         }
+        }
      } force_repellors_, force_attractors_, final_force_;
+
+    // Now the internal list for the repellors
+    std::vector<std::list<Force>> reppellors_list_;
+    std::list<Force> raw_repellors_;
+    std::list<Force> tmp_repellors_;
+
+    void addRawPoint(Force force);
 
 
 };

@@ -9,7 +9,7 @@ PLUGINLIB_EXPORT_CLASS(wheelchair_iaslab_proximityplanner::ProximityPlanner, nav
 
 namespace wheelchair_iaslab_proximityplanner{
 
-ProximityPlanner::ProximityPlanner() : costmap_ros_(NULL),
+ProximityPlanner::ProximityPlanner() : //costmap_.costmap_ros(NULL),
                                //_costmap_converter_loader("costmap_converter", "costmap_converter::BaseCostmapToPolygons"),
                                tf_(NULL),
                                initialized_(false)
@@ -33,8 +33,8 @@ void ProximityPlanner::initialize(std::string name, tf2_ros::Buffer* tf,
         nh.param<double>("min_cost", this->_min_cost, 0.0d);
         // init costmap variables
         tf_ = tf;
-        costmap_ros_ = costmap_ros;
-        _costmap     = costmap_ros_->getCostmap();  // locking should be done in MoveBase.
+        this->costmap_.costmap_ros = costmap_ros;
+        this->costmap_.costmap     = costmap_ros->getCostmap();  // locking should be done in MoveBase.
 
         // special parameters
         nh.param("odom_topic", _params.odom_topic, _params.odom_topic);
@@ -49,7 +49,9 @@ void ProximityPlanner::initialize(std::string name, tf2_ros::Buffer* tf,
         nh.param<float>("vel_angular_min", this->vel_angular_min_, 0.0f);
         nh.param<float>("vel_angular_max", this->vel_angular_max_, 1.0f);
 
-        ROS_INFO("The current configuration is the following: \n repellor_angular_strength: %f, repellor_angular_decay: %f, vel_linear_min: %f, vel_linear_max: %f, vel_angular_min: %f, vel_angular_max: %f", 
+        ROS_INFO("The current configuration is the following: \n repellor_angular_strength: \
+            %f, repellor_angular_decay: %f, vel_linear_min: %f, vel_linear_max: %f,\
+            vel_angular_min: %f, vel_angular_max: %f", 
             this->repellor_angular_strength_, this->repellor_angular_decay_, this->vel_linear_min_, 
             this->vel_linear_max_, this->vel_angular_min_, this->vel_angular_max_);
 
@@ -57,10 +59,20 @@ void ProximityPlanner::initialize(std::string name, tf2_ros::Buffer* tf,
         nh.param<std::vector<float>>("rel_verts_x", this->rel_verts_x_, this->rel_verts_x_);
         nh.param<std::vector<float>>("rel_verts_y", this->rel_verts_y_, this->rel_verts_y_);
 
-        for (int i = 0; i < rel_verts_x_.size(); i++)
-        {
+        for (int i = 0; i < rel_verts_x_.size(); i++) {
             ROS_INFO("rel_verts_x[%d]: %f, rel_verts_y[%d]: %f", i, rel_verts_x_[i], i, rel_verts_y_[i]);
         }
+
+        // Now convert the index as a polar coordinate and add the list of the Forces
+        for (int i = 0; i < rel_verts_x_.size(); i++) {
+            rel_verts_d_.push_back(sqrt(pow(rel_verts_x_[i], 2) + pow(rel_verts_y_[i], 2)));
+            rel_verts_theta_.push_back(atan2(rel_verts_y_[i], rel_verts_x_[i]));
+
+            reppellors_list_.push_back(std::list<Force>());
+        }
+
+        this->raw_repellors_ = std::list<Force>();
+        this->tmp_repellors_ = std::list<Force>();
 
         // load the range parametes
         nh.param<float>("range_min", this->range_min_, 0.0f);
@@ -171,20 +183,180 @@ void ProximityPlanner::computeAttractorForce() {
 }
 
 void ProximityPlanner::computeRepellorForce() {
-    // TODO: complete this function
+    // As initial step clear the data
     this->force_repellors_.intensity = 0.0f;
     this->force_repellors_.theta = 0.0f;
+    int index_vertex = 0;
+
+    for (index_vertex = 0; index_vertex < this->reppellors_list_.size(); index_vertex++) {
+        this->reppellors_list_[index_vertex].clear();
+    }
+    this->raw_repellors_.clear();
+    this->tmp_repellors_.clear();
+
+    // First update the internal map
+    this->updateInternalMap();
+
+    // Then look for each point in the map if could be an obstacle and attach to the lists
+    this->updateRawRepellors();
+
+    // Then clean the lists if the points are to close to each other or are under a closer obstacle
+    this->cleanRawRepellors();
+
+    // Convert the list of distance to forces
+
+    // As a final step collapse the list to a single force
+}
+
+void ProximityPlanner::cleanRawRepellors() {
+    // There should be better way to do this but the idea is the following
+    // First randomize the list, than for each point look if is the nearest 
+    // from the center point in a radius defined in the angle_min_
+    
+    /*std::random_device rd;
+    std::mt19937 generator(rd());
+    std::shuffle(v.begin(), v.end(), generator);*/
+
+    std::list<Force>::iterator it, nit;
+    Force tmp_force = Force(0.0f, 0.0f);
+
+    ROS_INFO("Cleaning repellors");
+
+    try {
+
+    for (it = this->raw_repellors_.begin(); it != this->raw_repellors_.end(); it++) {
+        ROS_INFO("loooool");
+
+        tmp_force = *it;
+        for (nit = this->raw_repellors_.begin(); nit != this->raw_repellors_.end(); nit++) {
+            ROS_INFO("loooool 2, theta = %f", tmp_force.theta);
+
+            // TODO: better implement this, for now is to slow
+
+
+            if ( tmp_force.theta > this->normalizeAngle(nit->theta - this->delta_angle_) && \
+                 tmp_force.theta < this->normalizeAngle(nit->theta + this->delta_angle_) ) {
+                // This is the case that the point is in the sector
+                // Here intesity is the distance from the center
+                if (tmp_force.intensity < nit->intensity) {
+                    tmp_force.intensity = nit->intensity;
+                }
+            }
+        }
+
+        // Before pushing the force into the other list, check if is not already present
+        bool found = false;
+        for (nit = this->tmp_repellors_.begin(); nit != this->tmp_repellors_.end(); nit++) {
+            ROS_INFO("loooool 3");
+            if (tmp_force.theta > this->normalizeAngle(nit->theta - this->delta_angle_) && \
+                 tmp_force.theta < this->normalizeAngle(nit->theta + this->delta_angle_) ) {
+                found = true;
+            }
+        }
+        if (!found) {
+          this->tmp_repellors_.push_back(tmp_force);
+          ROS_INFO("-----------------------------------------------------------loooool 4");
+        } else {
+          ROS_INFO("***********************************************************loooool 5");
+        }
+    }
+
+    } catch (std::exception& e) {
+        ROS_ERROR("Exception: %s", e.what());
+    }
+
+    ROS_INFO("Repellors cleaned");
+
+}
+
+void ProximityPlanner::addRawPoint(Force force) {
+    bool found = false;
+
+    std::list<Force>::iterator it;
+    for (it = this->raw_repellors_.begin(); it != this->raw_repellors_.end(); it++) {
+        if (force.theta > this->normalizeAngle(it->theta - this->delta_angle_) && \
+            force.theta < this->normalizeAngle(it->theta + this->delta_angle_) ) {
+            found = true;
+            it->intensity = std::min(it->intensity, force.intensity);
+        }
+    }
+    if (!found)
+      this->raw_repellors_.push_back(force);
+}
+
+void ProximityPlanner::updateRawRepellors() {
+
+    float current_angle    = 0.0f;
+    float current_distance = 0.0f;
+    float current_cost     = 0.0f;
+
+    for (int indx_x = 0; indx_x < this->costmap_.length_x; indx_x++) {
+        for(int indx_y = 0; indx_y < this->costmap_.length_y; indx_y++) {
+
+            current_cost = this->costmap_.costmap->getCost(indx_x, indx_y);
+
+            if (current_cost < _min_cost) {
+                // The point need to be considered as a possible raw point
+
+                current_angle = getAngle(indx_x, indx_y, this->costmap_.center_x, \
+                                         this->costmap_.center_y, this->costmap_.resolution);
+
+                // This is the euclidean distance to the center
+                current_distance  = (indx_x - this->costmap_.center_x) * (indx_x - this->costmap_.center_x);
+                current_distance += (indx_y - this->costmap_.center_y) * (indx_y - this->costmap_.center_y);
+                current_distance  = sqrt(current_distance) * this->costmap_.resolution;
+
+                // Using force since it is a simple vector in polar coordinate
+                this->addRawPoint(Force(current_distance, current_angle));
+            }
+        }
+    }
+}
+
+void ProximityPlanner::updateInternalMap() {
+    // First request the updated map
+    this->costmap_.costmap_ros->updateMap();
+    this->costmap_.costmap = this->costmap_.costmap_ros->getCostmap();
+
+    this->costmap_.length_x = this->costmap_.costmap->getSizeInCellsX();
+    this->costmap_.length_y = this->costmap_.costmap->getSizeInCellsY();
+    this->costmap_.center_x = this->costmap_.length_x / 2;
+    this->costmap_.center_y = this->costmap_.length_y / 2;
+
+    this->costmap_.resolution = this->costmap_.costmap->getResolution();
 }
 
 void ProximityPlanner::computeTwist(geometry_msgs::Twist& cmd_vel) {
     cmd_vel.linear.x  = this->final_force_.intensity;
     cmd_vel.angular.z = this->final_force_.theta;
+
+    cmd_vel.linear.x  = this->normalizeVelocity(cmd_vel.linear.x,  this->vel_linear_min_,  this->vel_linear_max_);
+    cmd_vel.angular.z = this->normalizeVelocity(cmd_vel.angular.z, this->vel_angular_min_, this->vel_angular_max_);
+}
+
+template <typename T> int sgn(T val) {
+    return (T(0) < val) - (val < T(0));
+}
+
+float ProximityPlanner::normalizeVelocity(float vel_a, float v_min, float v_max) {
+    // More than a "normalize" this will put boundaries on the velocity 
+    int current_sing(sgn(vel_a));
+
+    vel_a = std::abs(vel_a);
+
+    if (vel_a < v_min) {
+        vel_a = v_min;
+    }else if(vel_a > v_max) {
+        vel_a = v_max;
+    }
+
+    return vel_a * ((float) current_sing);
 }
 
 void ProximityPlanner::updateCurrentPosition()
 {
     geometry_msgs::PoseStamped robot_pose;
-    costmap_ros_->getRobotPose(robot_pose);
+    this->costmap_.costmap_ros->getRobotPose(robot_pose);
     
     _current_position = robot_pose.pose.position;
     _current_position.z = tf::getYaw(robot_pose.pose.orientation);
@@ -301,14 +473,8 @@ double ProximityPlanner::getAngle(int pos_x, int pos_y, int center_x, int center
 
     angle -= M_PI;
 
-    // Normalize the angle
-    if (angle < -M_PI) {
-        angle = 2 * M_PI + angle;
-    }else if (angle > M_PI) {
-        angle = -2 * M_PI - angle;
-    }
-
-    return angle; 
+    // Normalize and return the angle
+    return this->normalizeAngle(angle); 
 }
 
 
