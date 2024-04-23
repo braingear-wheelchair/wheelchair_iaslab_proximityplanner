@@ -55,6 +55,11 @@ void ProximityPlanner::initialize(std::string name, tf2_ros::Buffer* tf,
             this->repellor_angular_strength_, this->repellor_angular_decay_, this->vel_linear_min_, 
             this->vel_linear_max_, this->vel_angular_min_, this->vel_angular_max_);
 
+        // Load the parameters for the visual range
+        nh.param<float>("angle_min", this->visual_range_.angle_min,  -M_PI);
+        nh.param<float>("angle_max", this->visual_range_.angle_max,   M_PI);
+        nh.param<float>("angle_inc", this->visual_range_.delta_angle, M_PI / 180.0f);
+
         // load the vertices of the vertices of the rectangle
         nh.param<std::vector<float>>("rel_verts_x", this->rel_verts_x_, this->rel_verts_x_);
         nh.param<std::vector<float>>("rel_verts_y", this->rel_verts_y_, this->rel_verts_y_);
@@ -234,8 +239,8 @@ void ProximityPlanner::cleanRawRepellors() {
             // TODO: better implement this, for now is to slow
 
 
-            if ( tmp_force.theta > this->normalizeAngle(nit->theta - this->delta_angle_) && \
-                 tmp_force.theta < this->normalizeAngle(nit->theta + this->delta_angle_) ) {
+            if ( tmp_force.theta > this->normalizeAngle(nit->theta - this->visual_range_.delta_angle) && \
+                 tmp_force.theta < this->normalizeAngle(nit->theta + this->visual_range_.delta_angle) ) {
                 // This is the case that the point is in the sector
                 // Here intesity is the distance from the center
                 if (tmp_force.intensity < nit->intensity) {
@@ -248,8 +253,8 @@ void ProximityPlanner::cleanRawRepellors() {
         bool found = false;
         for (nit = this->tmp_repellors_.begin(); nit != this->tmp_repellors_.end(); nit++) {
             ROS_INFO("loooool 3");
-            if (tmp_force.theta > this->normalizeAngle(nit->theta - this->delta_angle_) && \
-                 tmp_force.theta < this->normalizeAngle(nit->theta + this->delta_angle_) ) {
+            if (tmp_force.theta > this->normalizeAngle(nit->theta - this->visual_range_.delta_angle) && \
+                tmp_force.theta < this->normalizeAngle(nit->theta + this->visual_range_.delta_angle) ) {
                 found = true;
             }
         }
@@ -274,8 +279,8 @@ void ProximityPlanner::addRawPoint(Force force) {
 
     std::list<Force>::iterator it;
     for (it = this->raw_repellors_.begin(); it != this->raw_repellors_.end(); it++) {
-        if (force.theta > this->normalizeAngle(it->theta - this->delta_angle_) && \
-            force.theta < this->normalizeAngle(it->theta + this->delta_angle_) ) {
+        if (force.theta > this->normalizeAngle(it->theta - this->visual_range_.delta_angle) && \
+            force.theta < this->normalizeAngle(it->theta + this->visual_range_.delta_angle) ) {
             found = true;
             it->intensity = std::min(it->intensity, force.intensity);
         }
@@ -295,7 +300,7 @@ void ProximityPlanner::updateRawRepellors() {
 
             current_cost = this->costmap_.costmap->getCost(indx_x, indx_y);
 
-            if (current_cost < _min_cost) {
+            if (current_cost > _min_cost) {
                 // The point need to be considered as a possible raw point
 
                 current_angle = getAngle(indx_x, indx_y, this->costmap_.center_x, \

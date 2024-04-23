@@ -118,7 +118,7 @@ private:
         std::string odom_topic = "/odom";
 
         double arrival_distance = 0.2;  // [m] the distance from the goal that when it is assumed to be reached
-        int sampling_distance = -1;  // the suuubsapling distance in the array, put -1 to give direct command to mpc 
+        int sampling_distance = -1;  // the subsapling distance in the array, put -1 to give direct command to mpc 
     } _params;
 
     // Parameters for compute the fields
@@ -130,7 +130,11 @@ private:
     float range_min_;
     float range_max_;
 
-    float delta_angle_ = 0.15;
+    struct VisualRange {
+        float angle_min;
+        float angle_max;
+        float delta_angle;
+    } visual_range_;
 
     float repellor_angular_strength_;
     float repellor_angular_decay_;
