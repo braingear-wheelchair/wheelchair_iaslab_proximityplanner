@@ -224,41 +224,6 @@ double ProximityPlanner::getDisstancePoints(geometry_msgs::Point p1, geometry_ms
     return sqrt(pow(p1.x - p2.x, 2) + pow(p1.y - p2.y, 2));
 }
 
-//void ProximityPlanner::updateObstacleContainerWithCostmapConverter()
-//{
-//    if (!_costmap_converter) return;
-//
-//    // Get obstacles from costmap converter
-//    costmap_converter::ObstacleArrayConstPtr obstacles = _costmap_converter->getObstacles();
-//    if (!obstacles) return;
-//
-//    std::vector<geometry_msgs::Pose> points = {};
-//    points.resize( obstacles->obstacles.size() );
-//
-//    int index = 0;
-//
-//    for (std::size_t i = 0; i < obstacles->obstacles.size(); ++i)
-//    {
-//        const costmap_converter::ObstacleMsg* obstacle = &obstacles->obstacles.at(i);
-//        const geometry_msgs::Polygon* polygon          = &obstacle->polygon;
-//
-//        geometry_msgs::Pose errorpoint = geometry_msgs::Pose();
-//        errorpoint.position.x = polygon->points[0].x;
-//        errorpoint.position.y = polygon->points[0].y;
-//
-//        // TODO: put the 2 to be a configuration parameter
-//        if(ProximityPlanner::getDisstancePoints(_current_position, errorpoint.position) < 3 )
-//        {
-//            points[index] = errorpoint;
-//            index++;
-//        }
-//
-//    }
-//
-//    points.resize( index );
-//    
-//}
-//
 //void ProximityPlanner::updateObstacleContainerWithCostmap() {
 //    this->costmap_ros_->updateMap();
 //    this->_costmap = costmap_ros_->getCostmap();
