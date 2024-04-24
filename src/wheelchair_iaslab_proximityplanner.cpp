@@ -193,11 +193,13 @@ void ProximityPlanner::computeRepellorForce() {
     this->force_repellors_.theta = 0.0f;
     int index_vertex = 0;
 
-    for (index_vertex = 0; index_vertex < this->reppellors_list_.size(); index_vertex++) {
-        this->reppellors_list_[index_vertex].clear();
-    }
-    this->raw_repellors_.clear();
-    this->tmp_repellors_.clear();
+    this->cleanRawRepellors();
+
+    //for (index_vertex = 0; index_vertex < this->reppellors_list_.size(); index_vertex++) {
+    //    this->reppellors_list_[index_vertex].clear();
+    //}
+    //this->raw_repellors_.clear();
+    //this->tmp_repellors_.clear();
 
     // First update the internal map
     this->updateInternalMap();
@@ -214,6 +216,23 @@ void ProximityPlanner::computeRepellorForce() {
 }
 
 void ProximityPlanner::cleanRawRepellors() {
+    // For each vertex initilize the list of repellors to inifinity
+    
+    int index_vertex = 0;
+    int current_angle = 0;
+
+    for (index_vertex = 0; index_vertex < this->reppellors_list_.size(); index_vertex++) {
+        this->reppellors_list_[index_vertex].clear();
+
+        current_angle = this->visual_range_.angle_min;
+
+        while (current_angle < this->visual_range_.angle_max) {
+            this->reppellors_list_[index_vertex].push_back(Force(INFINITY, current_angle));
+            current_angle += this->visual_range_.delta_angle;
+        }
+    }
+
+
     // There should be better way to do this but the idea is the following
     // First randomize the list, than for each point look if is the nearest 
     // from the center point in a radius defined in the angle_min_
@@ -221,6 +240,8 @@ void ProximityPlanner::cleanRawRepellors() {
     /*std::random_device rd;
     std::mt19937 generator(rd());
     std::shuffle(v.begin(), v.end(), generator);*/
+
+    /*
 
     std::list<Force>::iterator it, nit;
     Force tmp_force = Force(0.0f, 0.0f);
@@ -271,6 +292,8 @@ void ProximityPlanner::cleanRawRepellors() {
     }
 
     ROS_INFO("Repellors cleaned");
+
+    */
 
 }
 
