@@ -108,6 +108,11 @@ void ProximityPlanner::samplePlan()
     _global_plan.sampled_global_plan.push_back(_global_plan.global_plan.back());
     _global_plan.current_index = 0;
 
+    // TODO: Instead to use a single point map the size of the robot and add
+    // an attractor for each point of the robot that I wanna to track
+    // it is needed to understand where to put this information, here or
+    // when I compute the local force?
+
 }
 
 
@@ -208,7 +213,7 @@ void ProximityPlanner::computeRepellorForce() {
     this->updateRawRepellors();
 
     // Then clean the lists if the points are to close to each other or are under a closer obstacle
-    this->cleanRawRepellors();
+    // this->cleanRawRepellors();
 
     // Convert the list of distance to forces
 
@@ -298,6 +303,9 @@ void ProximityPlanner::cleanRawRepellors() {
 }
 
 void ProximityPlanner::addRawPoint(Force force) {
+    // Now try to add the point in each list of tracking verts
+
+
     bool found = false;
 
     std::list<Force>::iterator it;
