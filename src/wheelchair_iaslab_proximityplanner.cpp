@@ -39,7 +39,8 @@ void ProximityPlanner::initialize(std::string name, tf2_ros::Buffer* tf,
         // special parameters
         nh.param("odom_topic", _params.odom_topic, _params.odom_topic);
 
-        nh.param<double>("arrival_distance", this->_params.arrival_distance, 0.5f);
+        nh.param<double>("arrival_distance",  this->_params.arrival_distance, 0.5f);
+        nh.param<double>("sampling_distance", this->_params.sampling_distance, 1.0f);
 
         // velocity parameters
         nh.param<float>("repellor_angular_strength", this->repellor_angular_strength_, 0.1f);
@@ -77,7 +78,6 @@ void ProximityPlanner::initialize(std::string name, tf2_ros::Buffer* tf,
         }
 
         this->raw_repellors_ = std::list<Force>();
-        this->tmp_repellors_ = std::list<Force>();
 
         // load the range parametes
         nh.param<float>("range_min", this->range_min_, 0.0f);
@@ -89,6 +89,9 @@ void ProximityPlanner::initialize(std::string name, tf2_ros::Buffer* tf,
 
         ROS_INFO("%f", this->force_repellors_.intensity);
 
+        // Initialize the publishers 
+        this->partial_angle_pub_ = nh.advertise<geometry_msgs::PoseArray>("pt_angular_directions", 1);
+
         initialized_ = true;
         ROS_DEBUG("proxymity_local_planner plugin initialized.");
     }
@@ -97,21 +100,22 @@ void ProximityPlanner::initialize(std::string name, tf2_ros::Buffer* tf,
 void ProximityPlanner::samplePlan()
 {
     _global_plan.sampled_global_plan = {};
-    
-    if (_params.sampling_distance > 0)
+
+    int previous_index = 0;
+
+    if (_params.sampling_distance > 0.0f)
     {
-        for(int i = 0; i < (int)_global_plan.global_plan.size(); i += _params.sampling_distance){
-            _global_plan.sampled_global_plan.push_back(_global_plan.global_plan[i]);
+        for(int i = 0; i < (int)_global_plan.global_plan.size(); i++) {
+            if (getDistancePoints(_global_plan.global_plan[i].pose.position, _global_plan.global_plan[previous_index].pose.position) \
+                  > _params.sampling_distance) {
+                _global_plan.sampled_global_plan.push_back(_global_plan.global_plan[i]);
+                previous_index = i;
+            }
         }
     }
 
     _global_plan.sampled_global_plan.push_back(_global_plan.global_plan.back());
     _global_plan.current_index = 0;
-
-    // TODO: Instead to use a single point map the size of the robot and add
-    // an attractor for each point of the robot that I wanna to track
-    // it is needed to understand where to put this information, here or
-    // when I compute the local force?
 
 }
 
@@ -134,6 +138,7 @@ bool ProximityPlanner::setPlan(
 
 bool ProximityPlanner::computeVelocityCommands(geometry_msgs::Twist& cmd_vel)
 {
+
     if(!initialized_)
     {
         ROS_ERROR("This planner has not been initialized");
@@ -142,16 +147,17 @@ bool ProximityPlanner::computeVelocityCommands(geometry_msgs::Twist& cmd_vel)
 
     updateCurrentPosition();
 
-    if (_global_plan.current_index < _global_plan.sampled_global_plan.size() )
-    {
+    // TODO: convert this as a for loop that from the last point find the nearest to the current position
+
+    if (_global_plan.current_index < _global_plan.sampled_global_plan.size() ) {
         // Check the distance from the current subgoal and if its ok update the mpc goal
         geometry_msgs::Point current_goal = _global_plan.sampled_global_plan[_global_plan.current_index].pose.position;
         double distance = getDistanceFromOdometry(current_goal);
 
-        if(distance < _params.arrival_distance)
-        {
+        if(distance < _params.arrival_distance) {
             _global_plan.current_index++;
         }
+
     }
 
     this->resetForces();
@@ -159,8 +165,6 @@ bool ProximityPlanner::computeVelocityCommands(geometry_msgs::Twist& cmd_vel)
     this->computeAttractorForce();
     this->computeTotalForce();
     this->computeTwist(cmd_vel);
-    
-    //this->publishSideInformation();
 
     return true;
 }
@@ -182,29 +186,53 @@ void ProximityPlanner::computeTotalForce() {
 
 void ProximityPlanner::computeAttractorForce() {
 
+    // Reset the attractor force
+    this->force_attractors_.intensity = 0.0f;
+    this->force_attractors_.theta = 0.0f;
+
     current_objective = &_global_plan.sampled_global_plan[_global_plan.current_index].pose.position;
 
-    this->force_attractors_.intensity = 1.0f / getDistanceFromOdometry(*current_objective);
-    this->force_attractors_.theta = std::atan2(current_objective->y - _current_position.y, current_objective->x - _current_position.x);
+    float requested_angle = tf::getYaw(_global_plan.sampled_global_plan[_global_plan.current_index].pose.orientation);
+    // We move from map to the frame of the robot, then we normalize the angle
+    requested_angle = normalizeAngle(requested_angle - _current_position.z);
 
-    this->force_attractors_.theta = this->force_attractors_.theta - _current_position.z;
-    this->force_attractors_.theta = normalizeAngle(this->force_attractors_.theta);
+    // Now reset the list of forces
+    this->attractors_list_.clear();
+    
+    Force attractor_tmp;
 
+    // Convert the attractor to a force
+    attractor_tmp.intensity = getDistanceFromOdometry(*current_objective);
+    attractor_tmp.theta = requested_angle;
+
+    // Add the force for each vertex wrt the corresponding angle
+    for (int index_vertex = 0; index_vertex < this->rel_verts_x_.size(); index_vertex++) {
+        Force attractor;
+
+        // The navigation angle should be coherent since the robot is a solid block
+        attractor.intensity = attractor_tmp.intensity;
+        attractor.theta = attractor_tmp.theta;
+        // If the robot is more complex this should be addressed in a different way
+
+        this->attractors_list_.push_back(attractor);
+    }
+
+    // Now sum the forces to the last one
+    for (int index_vertex = 0; index_vertex < this->attractors_list_.size(); index_vertex++) {
+        this->force_attractors_ = this->force_attractors_ + this->attractors_list_[index_vertex];
+        this->force_attractors_.theta = normalizeAngle(this->force_attractors_.theta);
+    }
+
+    // Now convert the attractor to a force
+    this->force_attractors_.intensity = 1.0f / this->force_attractors_.intensity;
 }
 
 void ProximityPlanner::computeRepellorForce() {
     // As initial step clear the data
     this->force_repellors_.intensity = 0.0f;
     this->force_repellors_.theta = 0.0f;
-    int index_vertex = 0;
 
     this->cleanRawRepellors();
-
-    //for (index_vertex = 0; index_vertex < this->reppellors_list_.size(); index_vertex++) {
-    //    this->reppellors_list_[index_vertex].clear();
-    //}
-    //this->raw_repellors_.clear();
-    //this->tmp_repellors_.clear();
 
     // First update the internal map
     this->updateInternalMap();
@@ -212,19 +240,39 @@ void ProximityPlanner::computeRepellorForce() {
     // Then look for each point in the map if could be an obstacle and attach to the lists
     this->updateRawRepellors();
 
-    // Then clean the lists if the points are to close to each other or are under a closer obstacle
-    // this->cleanRawRepellors();
+    this->publishSideInformation();
 
     // Convert the list of distance to forces
+    this->convertRawRepellorsToForces();
 
     // As a final step collapse the list to a single force
+    this->collapseRepellorsList();
+}
+
+void ProximityPlanner::convertRawRepellorsToForces() {
+    for (int index_vertex = 0; index_vertex < this->reppellors_list_.size(); index_vertex++) {
+        for(auto it = this->reppellors_list_[index_vertex].begin(); it != this->reppellors_list_[index_vertex].end(); it++) {
+            it->intensity = 1.0f / it->intensity;
+            it->theta = normalizeAngle(-it->theta);
+        }
+    }
+   
+}
+
+void ProximityPlanner::collapseRepellorsList() {
+    // Now sum the forces to the last one
+    for (int index_vertex = 0; index_vertex < this->reppellors_list_.size(); index_vertex++) {
+        for(auto it = this->reppellors_list_[index_vertex].begin(); it != this->reppellors_list_[index_vertex].end(); it++) {
+            this->force_repellors_ = this->force_repellors_ + *it;
+            this->force_repellors_.theta = normalizeAngle(this->force_repellors_.theta);
+        }
+    }
 }
 
 void ProximityPlanner::cleanRawRepellors() {
     // For each vertex initilize the list of repellors to inifinity
-    
     int index_vertex = 0;
-    int current_angle = 0;
+    float current_angle = 0;
 
     for (index_vertex = 0; index_vertex < this->reppellors_list_.size(); index_vertex++) {
         this->reppellors_list_[index_vertex].clear();
@@ -236,88 +284,45 @@ void ProximityPlanner::cleanRawRepellors() {
             current_angle += this->visual_range_.delta_angle;
         }
     }
-
-
-    // There should be better way to do this but the idea is the following
-    // First randomize the list, than for each point look if is the nearest 
-    // from the center point in a radius defined in the angle_min_
-    
-    /*std::random_device rd;
-    std::mt19937 generator(rd());
-    std::shuffle(v.begin(), v.end(), generator);*/
-
-    /*
-
-    std::list<Force>::iterator it, nit;
-    Force tmp_force = Force(0.0f, 0.0f);
-
-    ROS_INFO("Cleaning repellors");
-
-    try {
-
-    for (it = this->raw_repellors_.begin(); it != this->raw_repellors_.end(); it++) {
-        ROS_INFO("loooool");
-
-        tmp_force = *it;
-        for (nit = this->raw_repellors_.begin(); nit != this->raw_repellors_.end(); nit++) {
-            ROS_INFO("loooool 2, theta = %f", tmp_force.theta);
-
-            // TODO: better implement this, for now is to slow
-
-
-            if ( tmp_force.theta > this->normalizeAngle(nit->theta - this->visual_range_.delta_angle) && \
-                 tmp_force.theta < this->normalizeAngle(nit->theta + this->visual_range_.delta_angle) ) {
-                // This is the case that the point is in the sector
-                // Here intesity is the distance from the center
-                if (tmp_force.intensity < nit->intensity) {
-                    tmp_force.intensity = nit->intensity;
-                }
-            }
-        }
-
-        // Before pushing the force into the other list, check if is not already present
-        bool found = false;
-        for (nit = this->tmp_repellors_.begin(); nit != this->tmp_repellors_.end(); nit++) {
-            ROS_INFO("loooool 3");
-            if (tmp_force.theta > this->normalizeAngle(nit->theta - this->visual_range_.delta_angle) && \
-                tmp_force.theta < this->normalizeAngle(nit->theta + this->visual_range_.delta_angle) ) {
-                found = true;
-            }
-        }
-        if (!found) {
-          this->tmp_repellors_.push_back(tmp_force);
-          ROS_INFO("-----------------------------------------------------------loooool 4");
-        } else {
-          ROS_INFO("***********************************************************loooool 5");
-        }
-    }
-
-    } catch (std::exception& e) {
-        ROS_ERROR("Exception: %s", e.what());
-    }
-
-    ROS_INFO("Repellors cleaned");
-
-    */
-
 }
 
 void ProximityPlanner::addRawPoint(Force force) {
     // Now try to add the point in each list of tracking verts
+    for (int index_ver = 0; index_ver < this->reppellors_list_.size(); index_ver++) {
+        // Now convert the point w.r.t. the vertex, that I reversed in order to correctly compute the sum
+        Force current_point = Force(this->rel_verts_d_[index_ver], -this->rel_verts_theta_[index_ver]);
+        force = force + current_point;
+        // TODO: check if the previus sum is correct
 
-
-    bool found = false;
-
-    std::list<Force>::iterator it;
-    for (it = this->raw_repellors_.begin(); it != this->raw_repellors_.end(); it++) {
-        if (force.theta > this->normalizeAngle(it->theta - this->visual_range_.delta_angle) && \
-            force.theta < this->normalizeAngle(it->theta + this->visual_range_.delta_angle) ) {
-            found = true;
-            it->intensity = std::min(it->intensity, force.intensity);
+        for (auto it = this->reppellors_list_[index_ver].begin(); it != this->reppellors_list_[index_ver].end(); it++) {
+            if (force.theta > this->normalizeAngle(it->theta - this->visual_range_.delta_angle) && \
+                force.theta < this->normalizeAngle(it->theta + this->visual_range_.delta_angle) ) {
+                it->intensity = std::min(it->intensity, force.intensity);
+            }
         }
     }
-    if (!found)
-      this->raw_repellors_.push_back(force);
+}
+
+void ProximityPlanner::publishSideInformation() {
+    geometry_msgs::PoseArray msg;
+
+    msg.header.stamp = ros::Time::now();
+
+    msg.header.frame_id = "wcias_base_link";
+
+    for (int index_ver = 0; index_ver < this->reppellors_list_.size(); index_ver++) {
+        for (auto it = this->reppellors_list_[index_ver].begin(); it != this->reppellors_list_[index_ver].end(); it++) {
+            if (it->intensity < INFINITY) {
+                geometry_msgs::Pose p;
+                p.position.x = rel_verts_x_[index_ver];
+                p.position.y = rel_verts_y_[index_ver];
+                p.orientation = tf::createQuaternionMsgFromYaw(it->theta);
+                msg.poses.push_back(p);
+            }
+        }
+    }
+
+    this->partial_angle_pub_.publish(msg);
 }
 
 void ProximityPlanner::updateRawRepellors() {
@@ -333,7 +338,6 @@ void ProximityPlanner::updateRawRepellors() {
 
             if (current_cost > _min_cost) {
                 // The point need to be considered as a possible raw point
-
                 current_angle = getAngle(indx_x, indx_y, this->costmap_.center_x, \
                                          this->costmap_.center_y, this->costmap_.resolution);
 
@@ -427,78 +431,10 @@ bool ProximityPlanner::isGoalReached()
     return false;
 }
 
-double ProximityPlanner::getDisstancePoints(geometry_msgs::Point p1, geometry_msgs::Point p2 )
+double ProximityPlanner::getDistancePoints(geometry_msgs::Point p1, geometry_msgs::Point p2 )
 {
     return sqrt(pow(p1.x - p2.x, 2) + pow(p1.y - p2.y, 2));
 }
-
-//void ProximityPlanner::updateObstacleContainerWithCostmap() {
-//    this->costmap_ros_->updateMap();
-//    this->_costmap = costmap_ros_->getCostmap();
-//
-//    // Get the resolution of the costmap
-//    double resolution = this->_costmap->getResolution();// / 2.0f;
-//    // Get the length of the costmap in x and y
-//    unsigned int length_x = this->_costmap->getSizeInCellsX();
-//    unsigned int length_y = this->_costmap->getSizeInCellsY();
-//
-//    // From the center of the map evaluate the nearest obstacle for each direction
-//    int num_iteration = (int) ((this->proxymity_msg_.angle_max - this->proxymity_msg_.angle_min) / this->proxymity_msg_.angle_increment);
-//
-//    std::vector<float> ranges;
-//    std::vector<float> costs;
-//
-//    // Initialize the ranges to infinity 
-//    ranges.reserve(num_iteration);
-//    ranges.assign(num_iteration, std::numeric_limits<float>::infinity());
-//
-//    costs.reserve(num_iteration);
-//    costs.assign(num_iteration, 0);
-//
-//    // Now we evaluate all the cell of the map and get the highest cost for each direction
-//    // Starting from the center of the map
-//    int center_x = length_x / 2;
-//    int center_y = length_y / 2;
-//
-//    for (int idx_x = 0; idx_x < length_x; idx_x++) {
-//        for (int idx_y = 0; idx_y < length_y; idx_y++) {
-//
-//            double current_angle = this->getAngle(idx_x, idx_y, center_x, center_y, resolution);
-//
-//            // Check if the current angle is in the range
-//            if (current_angle < this->proxymity_msg_.angle_max && current_angle > this->proxymity_msg_.angle_min) {
-//
-//                float cost = this->_costmap->getCost(idx_x, idx_y);
-//
-//                if (cost > this->_min_cost) {
-//
-//                    int current_index = 0;
-//
-//                    while (current_angle > this->proxymity_msg_.angle_min + current_index * this->proxymity_msg_.angle_increment) {
-//                        current_index++;
-//                    }
-//
-//                    current_index--; // This should fix a small bug on the last iteration
-//
-//                    if(cost > costs[current_index]) {
-//                        costs[current_index] = cost;
-//
-//                        double distance = (idx_x - center_x) * (idx_x - center_x) + (idx_y - center_y) * (idx_y - center_y);
-//                        distance = std::sqrt(distance) * (resolution);
-//
-//                        if(distance < this->proxymity_msg_.range_max && distance > this->proxymity_msg_.range_min) 
-//                            ranges[current_index] = distance;
-//                    }
-//                }
-//            }
-//        }
-//    } 
-//
-//    // Now save the ranges into the proximity_msgs range
-//    this->proxymity_msg_.ranges = ranges;
-//
-//    return;
-//}
 
 double ProximityPlanner::getAngle(int pos_x, int pos_y, int center_x, int center_y, double resolution) {
     double angle = 0.0;
@@ -513,7 +449,6 @@ double ProximityPlanner::getAngle(int pos_x, int pos_y, int center_x, int center
     return this->normalizeAngle(angle); 
 }
 
-
 float ProximityPlanner::normalizeAngle(float angle) {
     if (angle < -M_PI) {
         angle = 2 * M_PI + angle;
@@ -523,6 +458,5 @@ float ProximityPlanner::normalizeAngle(float angle) {
     return angle;
 }
 
-}
-
+} // namespace wheelchair_iaslab
 

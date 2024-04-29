@@ -59,7 +59,7 @@ public:
     float normalizeAngle(float angle);
     
 protected:
-    double getDisstancePoints(geometry_msgs::Point p1, geometry_msgs::Point p2 );
+    double getDistancePoints(geometry_msgs::Point p1, geometry_msgs::Point p2 );
 
     void updateCurrentPosition();
     void samplePlan();
@@ -86,8 +86,13 @@ private:
     void updateInternalMap();
     void updateRawRepellors();
     void cleanRawRepellors();
+    void convertRawRepellorsToForces();
+    void collapseRepellorsList();
 
 private:
+
+    ros::Publisher partial_angle_pub_;
+
     struct maps_ptrs {
         costmap_2d::Costmap2DROS*  costmap_ros;
         costmap_2d::Costmap2D*     costmap; // Pointer to the 2d costmap (obtained from the costmap ros wrapper)
@@ -117,8 +122,8 @@ private:
     {
         std::string odom_topic = "/odom";
 
-        double arrival_distance = 0.2;  // [m] the distance from the goal that when it is assumed to be reached
-        int sampling_distance = -1;  // the subsapling distance in the array, put -1 to give direct command to mpc 
+        double arrival_distance;  // [m] the distance from the goal that when it is assumed to be reached
+        double sampling_distance; // [m]the subsapling distance in the array 
     } _params;
 
     // Parameters for compute the fields
@@ -174,11 +179,10 @@ private:
 
     // Now the internal list for the repellors
     std::vector<std::list<Force>> reppellors_list_;
+    std::vector<Force> attractors_list_;
     std::list<Force> raw_repellors_;
-    std::list<Force> tmp_repellors_;
 
     void addRawPoint(Force force);
-
 
 };
 
