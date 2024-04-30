@@ -146,10 +146,20 @@ bool ProximityPlanner::computeVelocityCommands(geometry_msgs::Twist& cmd_vel)
     }
 
     updateCurrentPosition();
+    this->updateGlobalPlanIndex();
+    this->resetForces();
+    this->computeRepellorForce();
+    this->computeAttractorForce();
+    this->computeTotalForce();
+    this->computeTwist(cmd_vel);
 
+    return true;
+}
+
+void ProximityPlanner::updateGlobalPlanIndex() {
     // TODO: convert this as a for loop that from the last point find the nearest to the current position
 
-    if (_global_plan.current_index < _global_plan.sampled_global_plan.size() ) {
+    /*if (_global_plan.current_index < _global_plan.sampled_global_plan.size() ) {
         // Check the distance from the current subgoal and if its ok update the mpc goal
         geometry_msgs::Point current_goal = _global_plan.sampled_global_plan[_global_plan.current_index].pose.position;
         double distance = getDistanceFromOdometry(current_goal);
@@ -158,15 +168,20 @@ bool ProximityPlanner::computeVelocityCommands(geometry_msgs::Twist& cmd_vel)
             _global_plan.current_index++;
         }
 
+    }*/
+
+    float tmp_distance = INFINITY;
+    for (int i = _global_plan.sampled_global_plan.size() - 1; i >= _global_plan.prev_index; i--) {
+
+        geometry_msgs::Point current_goal = _global_plan.sampled_global_plan[i].pose.position;
+        double distance = getDistanceFromOdometry(current_goal);
+        if (distance < tmp_distance) {
+            _global_plan.prev_index = i;
+            tmp_distance = distance;
+        }
     }
 
-    this->resetForces();
-    this->computeRepellorForce();
-    this->computeAttractorForce();
-    this->computeTotalForce();
-    this->computeTwist(cmd_vel);
-
-    return true;
+    _global_plan.current_index = _global_plan.prev_index;
 }
 
 void ProximityPlanner::resetForces()

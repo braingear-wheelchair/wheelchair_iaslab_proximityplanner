@@ -88,6 +88,7 @@ private:
     void cleanRawRepellors();
     void convertRawRepellorsToForces();
     void collapseRepellorsList();
+    void updateGlobalPlanIndex();
 
 private:
 
@@ -113,6 +114,7 @@ private:
         std::vector<geometry_msgs::PoseStamped> global_plan;  //!< Store the current global plan
         std::vector<geometry_msgs::PoseStamped> sampled_global_plan; //!< Sample in the distance the global plan
         int current_index = -1;
+        int prev_index = 0;
     } _global_plan;
 
     geometry_msgs::Point* current_objective;
