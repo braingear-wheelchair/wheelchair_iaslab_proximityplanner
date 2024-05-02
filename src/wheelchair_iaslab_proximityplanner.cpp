@@ -60,6 +60,7 @@ void ProximityPlanner::initialize(std::string name, tf2_ros::Buffer* tf,
         nh.param<float>("angle_min", this->visual_range_.angle_min,  -M_PI);
         nh.param<float>("angle_max", this->visual_range_.angle_max,   M_PI);
         nh.param<float>("angle_inc", this->visual_range_.delta_angle, M_PI / 180.0f);
+        nh.param<float>("safe_distance", this->visual_range_.safe_distance, 0.3f);
 
         // load the vertices of the vertices of the rectangle
         nh.param<std::vector<float>>("rel_verts_x", this->rel_verts_x_, this->rel_verts_x_);
@@ -157,19 +158,6 @@ bool ProximityPlanner::computeVelocityCommands(geometry_msgs::Twist& cmd_vel)
 }
 
 void ProximityPlanner::updateGlobalPlanIndex() {
-    // TODO: convert this as a for loop that from the last point find the nearest to the current position
-
-    /*if (_global_plan.current_index < _global_plan.sampled_global_plan.size() ) {
-        // Check the distance from the current subgoal and if its ok update the mpc goal
-        geometry_msgs::Point current_goal = _global_plan.sampled_global_plan[_global_plan.current_index].pose.position;
-        double distance = getDistanceFromOdometry(current_goal);
-
-        if(distance < _params.arrival_distance) {
-            _global_plan.current_index++;
-        }
-
-    }*/
-
     float tmp_distance = INFINITY;
     for (int i = _global_plan.sampled_global_plan.size() - 1; i >= _global_plan.prev_index; i--) {
 
@@ -240,6 +228,7 @@ void ProximityPlanner::computeAttractorForce() {
 
     // Now convert the attractor to a force
     this->force_attractors_.intensity = 1.0f / this->force_attractors_.intensity;
+    // TODO: instead convert to pf
 }
 
 void ProximityPlanner::computeRepellorForce() {
@@ -269,6 +258,7 @@ void ProximityPlanner::convertRawRepellorsToForces() {
         for(auto it = this->reppellors_list_[index_vertex].begin(); it != this->reppellors_list_[index_vertex].end(); it++) {
             it->intensity = 1.0f / it->intensity;
             it->theta = normalizeAngle(-it->theta);
+            // TODO: here convert to hangle and compute the pf
         }
     }
    
@@ -302,12 +292,15 @@ void ProximityPlanner::cleanRawRepellors() {
 }
 
 void ProximityPlanner::addRawPoint(Force force) {
+    float theta = force.theta;
     // Now try to add the point in each list of tracking verts
     for (int index_ver = 0; index_ver < this->reppellors_list_.size(); index_ver++) {
         // Now convert the point w.r.t. the vertex, that I reversed in order to correctly compute the sum
         Force current_point = Force(this->rel_verts_d_[index_ver], -this->rel_verts_theta_[index_ver]);
         force = force + current_point;
         // TODO: check if the previus sum is correct
+        // Now convert it into the hangle
+        force.theta = this->computeHangle(theta, force.theta);
 
         for (auto it = this->reppellors_list_[index_ver].begin(); it != this->reppellors_list_[index_ver].end(); it++) {
             if (force.theta > this->normalizeAngle(it->theta - this->visual_range_.delta_angle) && \
@@ -382,7 +375,7 @@ void ProximityPlanner::updateInternalMap() {
 }
 
 void ProximityPlanner::computeTwist(geometry_msgs::Twist& cmd_vel) {
-    cmd_vel.linear.x  = this->final_force_.intensity;
+    cmd_vel.linear.x  = getVlin(); // this->final_force_.intensity;
     cmd_vel.angular.z = this->final_force_.theta;
 
     cmd_vel.linear.x  = this->normalizeVelocity(cmd_vel.linear.x,  this->vel_linear_min_,  this->vel_linear_max_);
@@ -456,11 +449,10 @@ double ProximityPlanner::getAngle(int pos_x, int pos_y, int center_x, int center
 
     // Calculate the angle
     angle = atan2((center_y - pos_y) * resolution, (center_x - pos_x) * resolution) - this->_current_position.z;
-    //angle = atan2((center_x - pos_x) * resolution, (center_y - pos_y) * resolution) - this->_current_position.z;
 
+    // Shift to look to the front of the robot
     angle -= M_PI;
 
-    // Normalize and return the angle
     return this->normalizeAngle(angle); 
 }
 
@@ -471,6 +463,40 @@ float ProximityPlanner::normalizeAngle(float angle) {
         angle = -2 * M_PI - angle;
     }
     return angle;
+}
+
+float ProximityPlanner::computeHangle(float thata_1, float thata_2) {
+    return (thata_1 - thata_2);
+}
+
+float ProximityPlanner::convertToPfs(float distance, float safe_distance, float angle) {
+    float rep = std::atan( std::tan(this->visual_range_.delta_angle/2.0f) + (safe_distance) / (safe_distance + distance));
+
+    return rep;
+}
+
+ProximityPlanner::Force ProximityPlanner::convertToDecay(float distance, float theta) {
+    // TODO: check this formula
+    float clambda = this->repellor_angular_strength_ * 
+      std::exp(-( (1.0f/ distance) - this->visual_range_.safe_distance  / this->repellor_angular_strength_ ) );
+
+
+    if( (1.0f/distance) < (this->visual_range_.safe_distance) )
+      clambda = this->repellor_angular_strength_;
+    return 0.0f;
+
+    float potential = clambda * theta * std::exp(-(std::pow(theta, 2))/(2.0f*pow( distance , 2)));
+
+    if (std::isnan(potential) == true)
+      potential = 0.0f;
+    if (std::isnan(distance) == true)
+      distance = 0.0f;  
+
+    return Force(distance, potential);
+}
+
+float ProximityPlanner::getVlin() {
+    return this->final_force_.intensity;
 }
 
 } // namespace wheelchair_iaslab

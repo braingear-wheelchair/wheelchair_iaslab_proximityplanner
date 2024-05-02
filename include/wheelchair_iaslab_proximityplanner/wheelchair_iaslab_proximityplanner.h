@@ -89,6 +89,9 @@ private:
     void convertRawRepellorsToForces();
     void collapseRepellorsList();
     void updateGlobalPlanIndex();
+    float computeHangle(float thata_1, float thata_2);
+    float convertToPfs(float distance, float safe_distance, float angle);
+    float getVlin();
 
 private:
 
@@ -141,6 +144,7 @@ private:
         float angle_min;
         float angle_max;
         float delta_angle;
+        float safe_distance;
     } visual_range_;
 
     float repellor_angular_strength_;
@@ -185,6 +189,7 @@ private:
     std::list<Force> raw_repellors_;
 
     void addRawPoint(Force force);
+    Force convertToDecay(float distance, float theta);
 
 };
 
