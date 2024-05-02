@@ -90,7 +90,7 @@ private:
     void collapseRepellorsList();
     void updateGlobalPlanIndex();
     float computeHangle(float thata_1, float thata_2);
-    float convertToPfs(float distance, float safe_distance, float angle);
+    float convertToPfs(float distance, float safe_distance);
     float getVlin();
 
 private:
@@ -189,7 +189,7 @@ private:
     std::list<Force> raw_repellors_;
 
     void addRawPoint(Force force);
-    Force convertToDecay(float distance, float theta);
+    float convertToDecay(float distance, float theta);
 
 };
 
