@@ -75,6 +75,8 @@ void ProximityPlanner::initialize(std::string name, tf2_ros::Buffer* tf,
             rel_verts_d_.push_back(sqrt(pow(rel_verts_x_[i], 2) + pow(rel_verts_y_[i], 2)));
             rel_verts_theta_.push_back(atan2(rel_verts_y_[i], rel_verts_x_[i]));
 
+            ROS_INFO("rel_verts_d[%d]: %f, rel_verts_theta[%d]: %f", i, rel_verts_d_[i], i, rel_verts_theta_[i]);
+
             reppellors_list_.push_back(std::list<Force>());
         }
 
@@ -292,21 +294,39 @@ void ProximityPlanner::cleanRawRepellors() {
 }
 
 void ProximityPlanner::addRawPoint(Force force) {
-    float theta = force.theta;
+
+    Force tmp_force = force;
+
+    ROS_INFO("angle: %f", tmp_force.theta);
+    
     // Now try to add the point in each list of tracking verts
-    for (int index_ver = 0; index_ver < this->reppellors_list_.size(); index_ver++) {
+    for (int index_ver = 0; index_ver < this->rel_verts_theta_.size(); index_ver++) {
         // Now convert the point w.r.t. the vertex, that I reversed in order to correctly compute the sum
-        Force current_point = Force(this->rel_verts_d_[index_ver], -this->rel_verts_theta_[index_ver]);
-        force = force + current_point;
-        // TODO: check if the previus sum is correct
-        // Now convert it into the hangle
-        force.theta = this->computeHangle(theta, force.theta);
+        Force current_vertx = Force(this->rel_verts_d_[index_ver], this->normalizeAngle(-M_PI/2.0f + this->rel_verts_theta_[index_ver]));
+        
+        Force rel_point = tmp_force + current_vertx;
+
+        force.theta = this->computeHangle(tmp_force.theta, rel_point.theta);
+        force.theta = normalizeAngle(force.theta);
+
+        // I need to better handle the angle, but this is the easiest for now
+        if (tmp_force.theta > 0.0f) {
+            force.theta = -force.theta;
+        }
+
+        bool found = false;
 
         for (auto it = this->reppellors_list_[index_ver].begin(); it != this->reppellors_list_[index_ver].end(); it++) {
-            if (force.theta > this->normalizeAngle(it->theta - this->visual_range_.delta_angle) && \
-                force.theta < this->normalizeAngle(it->theta + this->visual_range_.delta_angle) ) {
-                it->intensity = std::min(it->intensity, force.intensity);
+            if (force.theta >= this->normalizeAngle(it->theta - this->visual_range_.delta_angle / 2.0f) && \
+                force.theta < this->normalizeAngle(it->theta + this->visual_range_.delta_angle / 2.0f) ) {
+                it->intensity = std::min(it->intensity, rel_point.intensity);
+                found = true;
             }
+        }
+
+        if (!found) {
+          ROS_ERROR("Vertex %d not found theta %f", index_ver, force.theta );
+
         }
     }
 }
@@ -316,11 +336,12 @@ void ProximityPlanner::publishSideInformation() {
 
     msg.header.stamp = ros::Time::now();
 
+    // TODO: convert this to a param
     msg.header.frame_id = "wcias_base_link";
 
     for (int index_ver = 0; index_ver < this->reppellors_list_.size(); index_ver++) {
         for (auto it = this->reppellors_list_[index_ver].begin(); it != this->reppellors_list_[index_ver].end(); it++) {
-            if (it->intensity < INFINITY) {
+            if (it->intensity < this->range_max_) {
                 geometry_msgs::Pose p;
                 p.position.x = rel_verts_x_[index_ver];
                 p.position.y = rel_verts_y_[index_ver];
@@ -457,10 +478,14 @@ double ProximityPlanner::getAngle(int pos_x, int pos_y, int center_x, int center
 }
 
 float ProximityPlanner::normalizeAngle(float angle) {
-    if (angle < -M_PI) {
-        angle = 2 * M_PI + angle;
-    }else if (angle > M_PI) {
-        angle = -2 * M_PI - angle;
+    // Normalize the angle
+
+    while( std::abs(angle) > M_PI) {
+        if (angle < -M_PI) {
+           angle = 2 * M_PI + angle;
+        }else if (angle > M_PI) {
+            angle = -2 * M_PI - angle;
+        }
     }
     return angle;
 }
