@@ -78,6 +78,7 @@ void ProximityPlanner::initialize(std::string name, tf2_ros::Buffer* tf,
             ROS_INFO("rel_verts_d[%d]: %f, rel_verts_theta[%d]: %f", i, rel_verts_d_[i], i, rel_verts_theta_[i]);
 
             reppellors_list_.push_back(std::list<Force>());
+            distance_list_.push_back(std::list<Force>());
         }
 
         this->raw_repellors_ = std::list<Force>();
@@ -293,6 +294,17 @@ void ProximityPlanner::cleanRawRepellors() {
             current_angle += this->visual_range_.delta_angle;
         }
     }
+
+    for (index_vertex = 0; index_vertex < this->distance_list_.size(); index_vertex++) {
+        this->distance_list_[index_vertex].clear();
+
+        current_angle = this->visual_range_.angle_min;
+
+        while (current_angle < this->visual_range_.angle_max) {
+            this->distance_list_[index_vertex].push_back(Force(INFINITY, current_angle));
+            current_angle += this->visual_range_.delta_angle;
+        }
+    }
 }
 
 void ProximityPlanner::addRawPoint(Force force) {
@@ -324,7 +336,15 @@ void ProximityPlanner::addRawPoint(Force force) {
 
         for (auto it = this->reppellors_list_[index_ver].begin(); it != this->reppellors_list_[index_ver].end(); it++) {
             if (force.theta >= this->normalizeAngle(it->theta - this->visual_range_.delta_angle / 2.0f) && \
-                force.theta < this->normalizeAngle(it->theta + this->visual_range_.delta_angle / 2.0f) ) {
+                force.theta <  this->normalizeAngle(it->theta + this->visual_range_.delta_angle / 2.0f) ) {
+                it->intensity = std::min(it->intensity, rel_point.intensity);
+                found = true;
+            }
+        }
+
+        for (auto it = this->distance_list_[index_ver].begin(); it != this->distance_list_[index_ver].end(); it++) {
+            if (rel_point.theta >= this->normalizeAngle(it->theta - this->visual_range_.delta_angle / 2.0f) && \
+                rel_point.theta <  this->normalizeAngle(it->theta + this->visual_range_.delta_angle / 2.0f) ) {
                 it->intensity = std::min(it->intensity, rel_point.intensity);
                 found = true;
             }
@@ -383,7 +403,7 @@ void ProximityPlanner::updateRawRepellors() {
 
                 // Using force since it is a simple vector in polar coordinate
                 this->addRawPoint(Force(current_distance, current_angle));
-            }
+          }
         }
     }
 }
@@ -402,7 +422,7 @@ void ProximityPlanner::updateInternalMap() {
 }
 
 void ProximityPlanner::computeTwist(geometry_msgs::Twist& cmd_vel) {
-    cmd_vel.linear.x  = 1.0f; //getVlin(); // this->final_force_.intensity;
+    cmd_vel.linear.x  = getVlin(this->final_force_.intensity); // this->final_force_.intensity;
     cmd_vel.angular.z = - this->final_force_.intensity;
 
     cmd_vel.linear.x *= 10.0f;
@@ -532,8 +552,28 @@ float ProximityPlanner::convertToDecay(float distance, float theta) {
 }
 
 
-float ProximityPlanner::getVlin() {
-    return this->final_force_.intensity;
+float ProximityPlanner::getVlin(float dt_theta) {
+    // Given a request change of theta,compute if the wheelchair have space to go in front of it
+    float vel = 10.0f;
+    float min_distance = this->range_max_;
+
+    for (int i = 0; i < this->rel_verts_d_.size(); i++) {
+        for (auto it = this->distance_list_[i].begin(); it != this->distance_list_[i].end(); it++) {
+           if (it->theta >= dt_theta - this->visual_range_.delta_angle/2.0f && it->theta <= dt_theta + this->visual_range_.delta_angle/2.0f) {
+               min_distance = std::min(min_distance, it->intensity);
+           }
+        }
+    }
+
+    ROS_INFO("min_distance: %f", min_distance);
+
+    if (min_distance < this->visual_range_.safe_distance) {
+        vel = 0.0f;
+    } else {
+        vel = std::log((min_distance - this->visual_range_.safe_distance) + 1.0f);
+    }
+
+    return vel;
 }
 
 } // namespace wheelchair_iaslab
