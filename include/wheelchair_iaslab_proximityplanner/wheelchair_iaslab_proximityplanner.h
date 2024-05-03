@@ -90,8 +90,8 @@ private:
     void collapseRepellorsList();
     void updateGlobalPlanIndex();
     float computeHangle(float thata_1, float thata_2);
-    float convertToPfs(float distance, float safe_distance, float angle);
-    float getVlin();
+    float convertToPfs(float distance, float safe_distance);
+    float getVlin(float dt_theta);
 
 private:
 
@@ -122,7 +122,6 @@ private:
 
     geometry_msgs::Point* current_objective;
 
-    
     struct Parameters
     {
         std::string odom_topic = "/odom";
@@ -185,11 +184,12 @@ private:
 
     // Now the internal list for the repellors
     std::vector<std::list<Force>> reppellors_list_;
+    std::vector<std::list<Force>> distance_list_;
     std::vector<Force> attractors_list_;
     std::list<Force> raw_repellors_;
 
     void addRawPoint(Force force);
-    Force convertToDecay(float distance, float theta);
+    float convertToDecay(float distance, float theta);
 
 };
 
