@@ -1,9 +1,11 @@
 #include "wheelchair_iaslab_proximityplanner/wheelchair_iaslab_proximityplanner.h"
+#include <cmath>
 #include <pluginlib/class_list_macros.h>
 
 // using ofstream constructors.
 #include <iostream>
 #include <fstream>  
+#include <variant>
 
 PLUGINLIB_EXPORT_CLASS(wheelchair_iaslab_proximityplanner::ProximityPlanner, nav_core::BaseLocalPlanner)
 
