@@ -11,6 +11,10 @@ PLUGINLIB_EXPORT_CLASS(wheelchair_iaslab_proximityplanner::ProximityPlanner, nav
 
 namespace wheelchair_iaslab_proximityplanner{
 
+template <typename T> int sgn(T val) {
+    return (T(0) < val) - (val < T(0));
+}
+
 ProximityPlanner::ProximityPlanner() : //costmap_.costmap_ros(NULL),
                                //_costmap_converter_loader("costmap_converter", "costmap_converter::BaseCostmapToPolygons"),
                                tf_(NULL),
@@ -97,6 +101,7 @@ void ProximityPlanner::initialize(std::string name, tf2_ros::Buffer* tf,
 
         // Initialize the publishers 
         this->partial_angle_pub_ = nh.advertise<geometry_msgs::PoseArray>("pt_angular_directions", 1);
+        this->partial_vel_pub_   = nh.advertise<geometry_msgs::PoseArray>("pt_velocities", 1);
 
         initialized_ = true;
         ROS_DEBUG("proxymity_local_planner plugin initialized.");
@@ -249,20 +254,20 @@ void ProximityPlanner::computeRepellorForce() {
     // Then look for each point in the map if could be an obstacle and attach to the lists
     this->updateRawRepellors();
 
-    this->publishSideInformation();
-
     // Convert the list of distance to forces
     this->convertRawRepellorsToForces();
 
     // As a final step collapse the list to a single force
     this->collapseRepellorsList();
+
+    this->publishSideInformation();
 }
 
 void ProximityPlanner::convertRawRepellorsToForces() {
     for (int index_vertex = 0; index_vertex < this->reppellors_list_.size(); index_vertex++) {
         for(auto it = this->reppellors_list_[index_vertex].begin(); it != this->reppellors_list_[index_vertex].end(); it++) {
             // Here the angle is already corrected, I only need to convert the distance to a pf field
-            it->intensity = this->convertToDecay(it->intensity, it->theta);
+            it->intensity = this->convertToDecay(it->intensity, it->theta) * sgn(it->hangle) * std::exp(std::abs(it->hangle)/2.0f);
             it->theta = normalizeAngle(-it->theta);
         }
     }
@@ -272,10 +277,13 @@ void ProximityPlanner::convertRawRepellorsToForces() {
 void ProximityPlanner::collapseRepellorsList() {
     // Now sum the forces to the last one
     for (int index_vertex = 0; index_vertex < this->reppellors_list_.size(); index_vertex++) {
+        float current_intensity = 0.0f;
         for(auto it = this->reppellors_list_[index_vertex].begin(); it != this->reppellors_list_[index_vertex].end(); it++) {
-            this->force_repellors_.intensity = this->force_repellors_.intensity + it->intensity;
+            current_intensity = current_intensity + it->intensity;
             this->force_repellors_.theta = normalizeAngle(this->force_repellors_.theta);
         }
+        this->forces_.push_back(Force(current_intensity, 0.0f));
+        this->force_repellors_.intensity += current_intensity;
     }
 
     ROS_INFO("Force repellors: %f %f", this->force_repellors_.intensity, this->force_repellors_.theta);
@@ -295,6 +303,8 @@ void ProximityPlanner::cleanRawRepellors() {
             this->reppellors_list_[index_vertex].push_back(Force(INFINITY, current_angle));
             current_angle += this->visual_range_.delta_angle;
         }
+
+        this->forces_.clear();
     }
 
     for (index_vertex = 0; index_vertex < this->distance_list_.size(); index_vertex++) {
@@ -316,17 +326,12 @@ void ProximityPlanner::addRawPoint(Force force) {
     // Now try to add the point in each list of tracking verts
     for (int index_ver = 0; index_ver < this->rel_verts_theta_.size(); index_ver++) {
         // Now convert the point w.r.t. the vertex, that I reversed in order to correctly compute the sum
-        Force current_vertx = Force(this->rel_verts_d_[index_ver], this->normalizeAngle(-M_PI/2.0f + this->rel_verts_theta_[index_ver]));
+        Force current_vertx = Force(this->rel_verts_d_[index_ver], this->normalizeAngle(this->rel_verts_theta_[index_ver]));
         
-        Force rel_point = tmp_force + current_vertx;
+        Force rel_point = tmp_force - current_vertx;
 
-        force.theta = this->computeHangle(tmp_force.theta, rel_point.theta);
-        force.theta = normalizeAngle(force.theta);
-
-        // I need to better handle the angle, but this is the easiest for now
-        if (tmp_force.theta > 0.0f) {
-            force.theta = -force.theta;
-        }
+        float hangle = this->computeHangle(tmp_force.theta, rel_point.theta);
+        force.theta = this->normalizeAngle(rel_point.theta);
 
         if (rel_verts_d_[index_ver] == 0.0f) {
             force = tmp_force;
@@ -340,13 +345,14 @@ void ProximityPlanner::addRawPoint(Force force) {
             if (force.theta >= this->normalizeAngle(it->theta - this->visual_range_.delta_angle / 2.0f) && \
                 force.theta <  this->normalizeAngle(it->theta + this->visual_range_.delta_angle / 2.0f) ) {
                 it->intensity = std::min(it->intensity, rel_point.intensity);
+                it->hangle = hangle;
                 found = true;
             }
         }
 
         for (auto it = this->distance_list_[index_ver].begin(); it != this->distance_list_[index_ver].end(); it++) {
-            if (rel_point.theta >= this->normalizeAngle(it->theta - this->visual_range_.delta_angle / 2.0f) && \
-                rel_point.theta <  this->normalizeAngle(it->theta + this->visual_range_.delta_angle / 2.0f) ) {
+            if (force.theta >= this->normalizeAngle(it->theta - this->visual_range_.delta_angle / 2.0f) && \
+                force.theta <  this->normalizeAngle(it->theta + this->visual_range_.delta_angle / 2.0f) ) {
                 it->intensity = std::min(it->intensity, rel_point.intensity);
                 found = true;
             }
@@ -368,7 +374,7 @@ void ProximityPlanner::publishSideInformation() {
     msg.header.frame_id = "wcias_base_link";
 
     for (int index_ver = 0; index_ver < this->reppellors_list_.size(); index_ver++) {
-        for (auto it = this->reppellors_list_[index_ver].begin(); it != this->reppellors_list_[index_ver].end(); it++) {
+        for (auto it = this->distance_list_[index_ver].begin(); it != this->distance_list_[index_ver].end(); it++) {
             if (it->intensity < this->range_max_) {
                 geometry_msgs::Pose p;
                 p.position.x = rel_verts_x_[index_ver];
@@ -380,6 +386,22 @@ void ProximityPlanner::publishSideInformation() {
     }
 
     this->partial_angle_pub_.publish(msg);
+
+    geometry_msgs::PoseArray msg_vel;
+
+    msg_vel.header.stamp = ros::Time::now();
+    msg_vel.header.frame_id = "wcias_base_link";
+
+    for (int index_ver = 0; index_ver < this->distance_list_.size(); index_ver++) {
+        geometry_msgs::Pose p;
+        p.position.x = rel_verts_x_[index_ver];
+        p.position.y = rel_verts_y_[index_ver];
+        float theta = this->normalizeAngle(this->forces_[index_ver].intensity);
+
+        p.orientation = tf::createQuaternionMsgFromYaw(theta);
+        msg_vel.poses.push_back(p);
+    }
+    this->partial_vel_pub_.publish(msg_vel);
 }
 
 void ProximityPlanner::updateRawRepellors() {
@@ -425,19 +447,14 @@ void ProximityPlanner::updateInternalMap() {
 
 void ProximityPlanner::computeTwist(geometry_msgs::Twist& cmd_vel) {
     cmd_vel.linear.x  = getVlin(this->final_force_.intensity); // this->final_force_.intensity;
-    cmd_vel.angular.z = - this->final_force_.intensity;
+    cmd_vel.angular.z = this->final_force_.intensity;
 
-    cmd_vel.linear.x *= 10.0f;
+    cmd_vel.linear.x  *= 10.0f;
     cmd_vel.angular.z *= 10.0f;
 
     cmd_vel.linear.x  = this->normalizeVelocity(cmd_vel.linear.x,  this->vel_linear_min_,  this->vel_linear_max_);
     cmd_vel.angular.z = this->normalizeVelocity(cmd_vel.angular.z, this->vel_angular_min_, this->vel_angular_max_);
 }
-
-template <typename T> int sgn(T val) {
-    return (T(0) < val) - (val < T(0));
-}
-
 float ProximityPlanner::normalizeVelocity(float vel_a, float v_min, float v_max) {
     // More than a "normalize" this will put boundaries on the velocity 
     int current_sing(sgn(vel_a));
@@ -558,6 +575,9 @@ float ProximityPlanner::getVlin(float dt_theta) {
     // Given a request change of theta,compute if the wheelchair have space to go in front of it
     float vel = 10.0f;
     float min_distance = this->range_max_;
+
+    dt_theta = this->normalizeAngle(0.0f);
+    // second atthhepnt put this to be zero
 
     for (int i = 0; i < this->rel_verts_d_.size(); i++) {
         for (auto it = this->distance_list_[i].begin(); it != this->distance_list_[i].end(); it++) {

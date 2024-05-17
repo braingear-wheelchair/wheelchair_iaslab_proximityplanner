@@ -96,6 +96,7 @@ private:
 private:
 
     ros::Publisher partial_angle_pub_;
+    ros::Publisher partial_vel_pub_;
 
     struct maps_ptrs {
         costmap_2d::Costmap2DROS*  costmap_ros;
@@ -159,6 +160,7 @@ private:
     struct Force {
         float intensity;
         float theta;
+          float hangle = 0.0f;
 
         Force(float intensity = 0.0f, float theta = 0.0f) : intensity(intensity), theta(theta) {}
 
@@ -180,6 +182,26 @@ private:
 
             return Force(new_intensity, new_theta);
         }
+
+        Force operator- (const Force& other) const {
+            std::vector<float> xs = {
+                this->intensity * std::cos(this->theta),
+                other.intensity * std::cos(other.theta)
+            };
+            std::vector<float> ys = {
+                this->intensity * std::sin(this->theta),
+                other.intensity * std::sin(other.theta)
+            };
+
+            float new_x = xs[0] - xs[1];
+            float new_y = ys[0] - ys[1];
+
+            float new_theta = std::atan2(new_y, new_x);
+            float new_intensity = std::sqrt(new_x * new_x + new_y * new_y);
+
+            return Force(new_intensity, new_theta);
+        }
+
      } force_repellors_, force_attractors_, final_force_;
 
     // Now the internal list for the repellors
@@ -187,6 +209,8 @@ private:
     std::vector<std::list<Force>> distance_list_;
     std::vector<Force> attractors_list_;
     std::list<Force> raw_repellors_;
+
+    std::vector<Force> forces_;
 
     void addRawPoint(Force force);
     float convertToDecay(float distance, float theta);
