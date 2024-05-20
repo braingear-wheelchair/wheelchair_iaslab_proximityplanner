@@ -212,6 +212,8 @@ private:
 
     std::vector<Force> forces_;
 
+    float min_distance_;
+
     void addRawPoint(Force force);
     float convertToDecay(float distance, float theta);
 

@@ -125,7 +125,7 @@ void ProximityPlanner::samplePlan()
         }
     }
 
-    _global_plan.sampled_global_plan.push_back(_global_plan.global_plan.back());
+    _global_plan.sampled_global_plan.push_back(_global_plan.global_plan[_global_plan.global_plan.size() - 1]);
     _global_plan.current_index = 0;
 
 }
@@ -169,10 +169,13 @@ bool ProximityPlanner::computeVelocityCommands(geometry_msgs::Twist& cmd_vel)
 
 void ProximityPlanner::updateGlobalPlanIndex() {
     float tmp_distance = INFINITY;
-    for (int i = _global_plan.sampled_global_plan.size() - 1; i >= _global_plan.prev_index; i--) {
+    int idx = _global_plan.current_index;
+    for (int i = _global_plan.sampled_global_plan.size() - 1; i >= idx; i--) {
 
         geometry_msgs::Point current_goal = _global_plan.sampled_global_plan[i].pose.position;
         double distance = getDistanceFromOdometry(current_goal);
+        ROS_INFO("distance: %f", distance);
+        ROS_INFO("tmp_distance: %f", tmp_distance);
         if (distance < tmp_distance) {
             _global_plan.prev_index = i;
             tmp_distance = distance;
@@ -193,8 +196,16 @@ void ProximityPlanner::resetForces()
 }
 
 void ProximityPlanner::computeTotalForce() {
-    this->final_force_ = this->force_repellors_; // = this->force_repellors_ + this->force_attractors_;
-    this->final_force_.theta = normalizeAngle(this->final_force_.theta);
+    this->force_repellors_.theta = this->force_repellors_.intensity;
+    this->force_repellors_.intensity = 1 / (this->min_distance_*this->min_distance_ + 0.001f);
+    this->force_attractors_.intensity /= 5.0f;
+
+    this->final_force_ = this->force_repellors_ + this->force_attractors_;
+    ROS_INFO("Force repellors d = %f, theta = %f", this->force_repellors_.intensity, this->force_repellors_.theta);
+    ROS_INFO("Force attractors d = %f, theta = %f", this->force_attractors_.intensity, this->force_attractors_.theta);
+    this->final_force_.intensity = this->final_force_.theta;
+
+    ROS_INFO("Final force d = %f, theta = %f", this->final_force_.intensity, this->final_force_.theta);
 }
 
 void ProximityPlanner::computeAttractorForce() {
@@ -204,10 +215,28 @@ void ProximityPlanner::computeAttractorForce() {
     this->force_attractors_.theta = 0.0f;
 
     current_objective = &_global_plan.sampled_global_plan[_global_plan.current_index].pose.position;
+    ROS_INFO("current indez = %d", _global_plan.current_index);
+    // I want to take this point and read as in the reference of the robot current position
+
+
+    float dx = current_objective->x - _current_position.x;
+    float dy = current_objective->y - _current_position.y;
+
+    float requested_angle = normalizeAngle( atan2(dy, dx) - _current_position.z );
+
+
+    /*
+    ROS_INFO("Current index = %d", _global_plan.current_index);
 
     float requested_angle = tf::getYaw(_global_plan.sampled_global_plan[_global_plan.current_index].pose.orientation);
     // We move from map to the frame of the robot, then we normalize the angle
+    requested_angle = normalizeAngle(requested_angle);
+    ROS_INFO("Current angle = %f", _current_position.z);
+    ROS_INFO("Requested angle = %f", requested_angle);
+
     requested_angle = normalizeAngle(requested_angle - _current_position.z);
+    ROS_INFO("Normalized angle = %f", requested_angle);
+    */
 
     // Now reset the list of forces
     this->attractors_list_.clear();
@@ -216,6 +245,7 @@ void ProximityPlanner::computeAttractorForce() {
 
     // Convert the attractor to a force
     attractor_tmp.intensity = getDistanceFromOdometry(*current_objective);
+    ROS_INFO("Intensity = %f", attractor_tmp.intensity);
     attractor_tmp.theta = requested_angle;
 
     // Add the force for each vertex wrt the corresponding angle
@@ -237,7 +267,7 @@ void ProximityPlanner::computeAttractorForce() {
     }
 
     // Now convert the attractor to a force
-    this->force_attractors_.intensity = 1.0f / this->force_attractors_.intensity;
+    // this->force_attractors_.intensity = 1.0f / this->force_attractors_.intensity;
     // TODO: instead convert to pf
 }
 
@@ -267,7 +297,7 @@ void ProximityPlanner::convertRawRepellorsToForces() {
     for (int index_vertex = 0; index_vertex < this->reppellors_list_.size(); index_vertex++) {
         for(auto it = this->reppellors_list_[index_vertex].begin(); it != this->reppellors_list_[index_vertex].end(); it++) {
             // Here the angle is already corrected, I only need to convert the distance to a pf field
-            it->intensity = this->convertToDecay(it->intensity, it->theta) * sgn(it->hangle) * std::exp(std::abs(it->hangle)/2.0f);
+            it->intensity = this->convertToDecay(it->intensity, it->theta) * std::exp( std::abs(it->theta) );
             it->theta = normalizeAngle(-it->theta);
         }
     }
@@ -331,7 +361,7 @@ void ProximityPlanner::addRawPoint(Force force) {
         Force rel_point = tmp_force - current_vertx;
 
         float hangle = this->computeHangle(tmp_force.theta, rel_point.theta);
-        force.theta = this->normalizeAngle(rel_point.theta);
+        force.theta = this->normalizeAngle(hangle);
 
         if (rel_verts_d_[index_ver] == 0.0f) {
             force = tmp_force;
@@ -574,25 +604,25 @@ float ProximityPlanner::convertToDecay(float distance, float theta) {
 float ProximityPlanner::getVlin(float dt_theta) {
     // Given a request change of theta,compute if the wheelchair have space to go in front of it
     float vel = 10.0f;
-    float min_distance = this->range_max_;
+    min_distance_ = this->range_max_;
 
     dt_theta = this->normalizeAngle(0.0f);
-    // second atthhepnt put this to be zero
+    // second attempt put this to be zero, TODO: convert dt_theta in requested the angle
 
     for (int i = 0; i < this->rel_verts_d_.size(); i++) {
         for (auto it = this->distance_list_[i].begin(); it != this->distance_list_[i].end(); it++) {
            if (it->theta >= dt_theta - this->visual_range_.delta_angle/2.0f && it->theta <= dt_theta + this->visual_range_.delta_angle/2.0f) {
-               min_distance = std::min(min_distance, it->intensity);
+               min_distance_ = std::min(min_distance_, it->intensity);
            }
         }
     }
 
-    ROS_INFO("min_distance: %f", min_distance);
+    ROS_INFO("min_distance: %f", min_distance_);
 
-    if (min_distance < this->visual_range_.safe_distance) {
+    if (min_distance_ < this->visual_range_.safe_distance) {
         vel = 0.0f;
     } else {
-        vel = std::log((min_distance - this->visual_range_.safe_distance) + 1.0f);
+        vel = std::log((min_distance_ - this->visual_range_.safe_distance) + 1.0f);
     }
 
     return vel;
