@@ -78,7 +78,8 @@ private:
     void computeRepellorForce();
     void computeAttractorForce();
     void computeTotalForce();
-    void computeTwist(geometry_msgs::Twist& cmd_vel); 
+    void computeTwist(geometry_msgs::Twist& cmd_vel);
+    void remapTwist(geometry_msgs::Twist& cmd_vel);
     void publishSideInformation();
 
     // Utilities
@@ -160,7 +161,7 @@ private:
     struct Force {
         float intensity;
         float theta;
-          float hangle = 0.0f;
+        float hangle = 0.0f;
 
         Force(float intensity = 0.0f, float theta = 0.0f) : intensity(intensity), theta(theta) {}
 
