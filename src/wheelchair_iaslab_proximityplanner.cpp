@@ -163,7 +163,7 @@ bool ProximityPlanner::computeVelocityCommands(geometry_msgs::Twist& cmd_vel)
     this->computeAttractorForce();
     this->computeTotalForce();
     this->computeTwist(cmd_vel);
-    // this->remapTwist(cmd_vel);
+    this->remapTwist(cmd_vel);
 
     return true;
 }
@@ -188,7 +188,7 @@ void ProximityPlanner::remapTwist(geometry_msgs::Twist& cmd_vel) {
     ROS_INFO("vel lin min x %f", this->vel_linear_min_);
 
     cmd_vel.angular.z = cmd_vel.angular.z * sng_z;
-    cmd_vel.linear.x = cmd_vel.linear.x * sng_x;
+    // cmd_vel.linear.x = cmd_vel.linear.x * sng_x;
 
 }
 
@@ -222,7 +222,7 @@ void ProximityPlanner::computeTotalForce() {
     // this->force_attractors_.theta = this->force_attractors_.intensity;
 
     this->force_repellors_.intensity = 1.0f;
-    this->force_attractors_.intensity = 0.7f;   
+    this->force_attractors_.intensity = 0.5f;   
     // 1.0f / (this->min_distance_*this->min_distance_ + 0.001f);
     // this->force_attractors_.intensity = 1.0f / this->force_attractors_.intensity;
 
@@ -285,7 +285,7 @@ void ProximityPlanner::computeAttractorForce() {
     //this->force_attractors_.intensity = this->convertToDecay(this->force_attractors_.intensity, this->force_attractors_.theta);
     // Normalize the force intensity
     
-    this->force_attractors_.theta = (this->force_attractors_.theta / (10.0f * M_PI) );
+    this->force_attractors_.theta = (this->force_attractors_.theta / (15.0f * M_PI) );
     if (this->force_attractors_.theta > 0.2f) {
         this->force_attractors_.theta = 0.2f;
     } else if (this->force_attractors_.theta < -0.2f) {
@@ -387,7 +387,11 @@ void ProximityPlanner::addRawPoint(Force force) {
         if (rel_verts_d_[index_ver] == 0.0f) {
             force = tmp_force;
             rel_point = tmp_force;
+            rel_point.theta *= -1.0f;
+            force.theta *= -1.0f;
             // TODO: check how to compose this
+            // this is a simple hack to fix the center point 
+            hangle = rel_point.theta;
         }
 
         bool found = false;
