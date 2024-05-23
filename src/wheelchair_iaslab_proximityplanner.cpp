@@ -226,7 +226,7 @@ void ProximityPlanner::computeTotalForce() {
     // 1.0f / (this->min_distance_*this->min_distance_ + 0.001f);
     // this->force_attractors_.intensity = 1.0f / this->force_attractors_.intensity;
 
-    this->final_force_ = this->force_repellors_ + this->force_attractors_;
+    this->final_force_ = this->force_repellors_;// + this->force_attractors_;
     ROS_INFO("Force repellors d = %f, theta = %f", this->force_repellors_.intensity, this->force_repellors_.theta);
     ROS_INFO("Force attractors d = %f, theta = %f", this->force_attractors_.intensity, this->force_attractors_.theta);
     this->final_force_.intensity = this->final_force_.theta;
@@ -598,6 +598,7 @@ float ProximityPlanner::computeHangle(float thata_1, float thata_2) {
 }
 
 float ProximityPlanner::convertToPfs(float distance, float safe_distance) {
+    // THIS is csigma, we can remove this function (is not used anywhere)
     float rep = std::atan( std::tan(this->visual_range_.delta_angle/2.0f) + (safe_distance) / (safe_distance + distance));
 
     return rep;
@@ -606,13 +607,13 @@ float ProximityPlanner::convertToPfs(float distance, float safe_distance) {
 float ProximityPlanner::convertToDecay(float distance, float theta) {
     // TODO: check this formula
     float clambda = this->repellor_angular_strength_ * 
-      std::exp(-( (distance - this->visual_range_.safe_distance) / (1.0 + this->visual_range_.safe_distance)) );
+      std::exp(-( (1.0f - this->visual_range_.safe_distance) / (distance + this->visual_range_.safe_distance)) ) / this->repellor_angular_decay_;
 
     // TODO: change the 1 to the size of the robot
 
 
-    if( (distance) < (this->visual_range_.safe_distance) )
-      clambda = this->repellor_angular_strength_;
+    //if( (distance) < (this->visual_range_.safe_distance) )
+    //  clambda = this->repellor_angular_strength_;
 
 
     float csigma = std::atan(std::tan(this->visual_range_.delta_angle/2.0f) + (this->visual_range_.safe_distance) / (this->visual_range_.safe_distance + distance));
