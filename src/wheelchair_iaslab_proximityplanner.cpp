@@ -501,7 +501,7 @@ void ProximityPlanner::updateInternalMap() {
 }
 
 void ProximityPlanner::computeTwist(geometry_msgs::Twist& cmd_vel) {
-    cmd_vel.linear.x  = getVlin(this->final_force_.intensity); // this->final_force_.intensity;
+    cmd_vel.linear.x  = computeVlin();
     cmd_vel.angular.z = this->final_force_.intensity;
 
     cmd_vel.linear.x  *= 1.1f;
@@ -626,13 +626,28 @@ float ProximityPlanner::convertToDecay(float distance, float theta) {
     return potential;
 }
 
+float ProximityPlanner::computeVlin() {
+    // For compute the linear velocity I want to check the presence of some obstacle in
+    // the frontal field of view of the wheelchair.
+
+    // TODO: check this function
+
+    std::vector<float> vel = {0.0f, -1.0, 1.0, -2.0f, 2.0f};
+
+    for (int i = 0; i < 3; i++) {
+        vel[i] = this->getVlin( vel[i] / (2.0f * M_PI));
+    }
+
+    return *std::min_element(vel.begin(), vel.end());
+
+}
 
 float ProximityPlanner::getVlin(float dt_theta) {
     // Given a request change of theta,compute if the wheelchair have space to go in front of it
     float vel = 10.0f;
     min_distance_ = this->range_max_;
 
-    dt_theta = this->normalizeAngle(0.0f);
+    dt_theta = this->normalizeAngle(dt_theta);
     // second attempt put this to be zero, TODO: convert dt_theta in requested the angle
 
     for (int i = 0; i < this->rel_verts_d_.size(); i++) {

@@ -92,6 +92,7 @@ private:
     void updateGlobalPlanIndex();
     float computeHangle(float thata_1, float thata_2);
     float convertToPfs(float distance, float safe_distance);
+    float computeVlin();
     float getVlin(float dt_theta);
 
 private:
