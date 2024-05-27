@@ -267,6 +267,8 @@ void ProximityPlanner::computeAttractorForce() {
 
         // The navigation angle should be coherent since the robot is a solid block
         attractor.intensity = attractor_tmp.intensity;
+        // convert the requested angle to pf and invert it to be an attractor and not a repellor
+        attractor.theta = this->convertToDecay(attractor_tmp.intensity, attractor_tmp.theta) * -1.0f;
         attractor.theta = this->normalizeAngle(attractor_tmp.theta);
         // If the robot is more complex this should be addressed in a different way
 
@@ -284,13 +286,14 @@ void ProximityPlanner::computeAttractorForce() {
 
     //this->force_attractors_.intensity = this->convertToDecay(this->force_attractors_.intensity, this->force_attractors_.theta);
     // Normalize the force intensity
-    
+    /* 
     this->force_attractors_.theta = (this->force_attractors_.theta / (15.0f * M_PI) );
     if (this->force_attractors_.theta > 0.2f) {
         this->force_attractors_.theta = 0.2f;
     } else if (this->force_attractors_.theta < -0.2f) {
         this->force_attractors_.theta = -0.2f;
     }
+    */
 }
 
 void ProximityPlanner::computeRepellorForce() {
