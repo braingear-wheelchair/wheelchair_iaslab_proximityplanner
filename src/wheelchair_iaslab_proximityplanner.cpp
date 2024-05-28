@@ -635,12 +635,12 @@ float ProximityPlanner::computeVlin() {
 
     // TODO: check this function
 
-    std::vector<float> vel = {0.0f, -1.0, 1.0, -2.0f, 2.0f, -3.0, 3.0};
+    std::vector<float> vel = {0.0f, -1.0, 1.0, -2.0f, 2.0f};
 
     for (int i = 0; i < vel.size(); i++) {
         vel[i] = this->getVlin( vel[i] / (2.0f * M_PI));
     }
-    
+
     return *std::min_element(vel.begin(), vel.end());
 
 }
