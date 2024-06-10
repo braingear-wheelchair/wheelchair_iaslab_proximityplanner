@@ -18,6 +18,7 @@
 #include <std_msgs/Header.h>
 #include <nav_msgs/Odometry.h>
 #include <tf/tf.h>
+#include <nav_msgs/Path.h> 
 
 // costmap converter libraries
 #include <costmap_converter/ObstacleMsg.h>
@@ -57,6 +58,10 @@ public:
     bool isGoalReached();
 
     float normalizeAngle(float angle);
+
+    void path_callback(const nav_msgs::Path::ConstPtr& msg);
+
+    ros::Subscriber sub;
     
 protected:
     double getDistancePoints(geometry_msgs::Point p1, geometry_msgs::Point p2 );
@@ -151,6 +156,12 @@ private:
 
     float repellor_angular_strength_;
     float repellor_angular_decay_;
+
+    float attractor_angular_strength_;
+    float attractor_angular_decay_;
+
+    float dt_;
+    float old_vel_;
 
     std::vector<float> rel_verts_x_;
     std::vector<float> rel_verts_y_;

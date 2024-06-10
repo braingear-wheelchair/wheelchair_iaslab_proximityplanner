@@ -49,8 +49,11 @@ void ProximityPlanner::initialize(std::string name, tf2_ros::Buffer* tf,
         nh.param<double>("sampling_distance", this->_params.sampling_distance, 1.0f);
 
         // velocity parameters
-        nh.param<float>("repellor_angular_strength", this->repellor_angular_strength_, 0.1f);
-        nh.param<float>("repellor_angular_decay", this->repellor_angular_decay_, 0.1f);
+        nh.param<float>("repellor_angular_strength",  this->repellor_angular_strength_,  1.0f);
+        nh.param<float>("repellor_angular_decay",     this->repellor_angular_decay_,     1.0f);
+        nh.param<float>("attractor_angular_strength", this->attractor_angular_strength_, 1.0f);
+        nh.param<float>("attractor_angular_decay",    this->attractor_angular_decay_,    1.0f);
+
         nh.param<float>("vel_linear_min", this->vel_linear_min_, 0.0f);
         nh.param<float>("vel_linear_max", this->vel_linear_max_, 1.0f);
         nh.param<float>("vel_angular_min", this->vel_angular_min_, 0.0f);
@@ -75,6 +78,8 @@ void ProximityPlanner::initialize(std::string name, tf2_ros::Buffer* tf,
         for (int i = 0; i < rel_verts_x_.size(); i++) {
             ROS_INFO("rel_verts_x[%d]: %f, rel_verts_y[%d]: %f", i, rel_verts_x_[i], i, rel_verts_y_[i]);
         }
+        
+        sub = nh.subscribe("/move_base/NavfnROS/plan", 1, &ProximityPlanner::path_callback, this);
 
         // Now convert the index as a polar coordinate and add the list of the Forces
         for (int i = 0; i < rel_verts_x_.size(); i++) {
@@ -97,6 +102,9 @@ void ProximityPlanner::initialize(std::string name, tf2_ros::Buffer* tf,
         this->force_repellors_  = Force(0.0f, 0.0f);
         this->force_attractors_ = Force(0.0f, 0.0f);
 
+        this->old_vel_ = 0.0f;
+        this->dt_ = 1.0f / 50.0f;
+
         ROS_INFO("%f", this->force_repellors_.intensity);
 
         // Initialize the publishers 
@@ -106,6 +114,10 @@ void ProximityPlanner::initialize(std::string name, tf2_ros::Buffer* tf,
         initialized_ = true;
         ROS_DEBUG("proxymity_local_planner plugin initialized.");
     }
+}
+
+void ProximityPlanner::path_callback(const nav_msgs::Path::ConstPtr& msg){
+    this->setPlan(msg->poses);
 }
 
 void ProximityPlanner::samplePlan()
@@ -140,6 +152,7 @@ bool ProximityPlanner::setPlan(
         ROS_ERROR("This planner has not been initialized");
         return false;
     }
+
     // Store the global plan
     _global_plan.global_plan = orig_global_plan;
     samplePlan();
@@ -155,6 +168,8 @@ bool ProximityPlanner::computeVelocityCommands(geometry_msgs::Twist& cmd_vel)
         ROS_ERROR("This planner has not been initialized");
         return false;
     }
+
+    ros::spinOnce();
 
     updateCurrentPosition();
     this->updateGlobalPlanIndex();
@@ -183,7 +198,7 @@ void ProximityPlanner::remapTwist(geometry_msgs::Twist& cmd_vel) {
     float scale_x = (this->vel_linear_max_ - this->vel_linear_min_)/(this->vel_linear_max_);
 
     cmd_vel.angular.z = cmd_vel.angular.z * scale_z + this->vel_angular_min_;
-    cmd_vel.linear.x = cmd_vel.linear.x * scale_x + this->vel_linear_min_;
+    cmd_vel.linear.x  = cmd_vel.linear.x * scale_x + this->vel_linear_min_;
 
     ROS_INFO("vel lin min x %f", this->vel_linear_min_);
 
@@ -219,15 +234,15 @@ void ProximityPlanner::resetForces()
 
 void ProximityPlanner::computeTotalForce() {
     this->force_repellors_.theta = this->force_repellors_.intensity;
-    // this->force_attractors_.theta = this->force_attractors_.intensity;
+    this->force_attractors_.theta = this->force_attractors_.intensity;
 
     this->force_repellors_.intensity = 1.0f;
     this->force_attractors_.intensity = 0.5f;   
     // 1.0f / (this->min_distance_*this->min_distance_ + 0.001f);
     // this->force_attractors_.intensity = 1.0f / this->force_attractors_.intensity;
 
-    this->final_force_ = this->force_repellors_;// + this->force_attractors_;
-    ROS_INFO("Force repellors d = %f, theta = %f", this->force_repellors_.intensity, this->force_repellors_.theta);
+    this->final_force_ = this->force_repellors_ + this->force_attractors_;
+    ROS_INFO("Force repellors  d = %f, theta = %f", this->force_repellors_.intensity, this->force_repellors_.theta);
     ROS_INFO("Force attractors d = %f, theta = %f", this->force_attractors_.intensity, this->force_attractors_.theta);
     this->final_force_.intensity = this->final_force_.theta;
 
@@ -258,31 +273,50 @@ void ProximityPlanner::computeAttractorForce() {
     attractor_tmp.intensity = getDistanceFromOdometry(*current_objective);
     attractor_tmp.theta = requested_angle;
 
-    ROS_INFO("requested %f %f, ", attractor_tmp.intensity, attractor_tmp.theta);
+    //ROS_INFO("requested %f %f, ", attractor_tmp.intensity, attractor_tmp.theta);
 
     // Add the force for each vertex wrt the corresponding angle
-    for (int index_vertex = 0; index_vertex < this->rel_verts_x_.size(); index_vertex++) {
+    for (int index_vertex = 0; index_vertex < 1; index_vertex++) {
         // TODO: move the attractor to the corrispettive requested angle
         Force attractor;
 
         // The navigation angle should be coherent since the robot is a solid block
-        attractor.intensity = attractor_tmp.intensity;
+        attractor.intensity = 1.0f /  attractor_tmp.intensity;
         // convert the requested angle to pf and invert it to be an attractor and not a repellor
-        attractor.theta = this->convertToDecay(attractor_tmp.intensity, attractor_tmp.theta) * -1.0f;
-        attractor.theta = this->normalizeAngle(attractor_tmp.theta);
+        // attractor_tmp.theta =this->normalizeAngle(M_PI - attractor_tmp.theta);
+
+        // LUCA USA SIN DEGLI ATTRATTORI
+
+        /*attractor.intensity = this->attractor_angular_strength_ * ( attractor_tmp.theta ) * 
+          std::exp( - std::pow( (attractor_tmp.theta ) / 
+        ( std::atan( std::tan( attractor_tmp.intensity )) * this->attractor_angular_decay_  ), 2.0));*/
+
+
+        attractor.intensity = this->attractor_angular_strength_ * std::sin( attractor_tmp.theta );
+        /* * 
+          std::exp( - std::pow( (attractor_tmp.theta ) / 
+        ( std::atan( std::tan( attractor_tmp.intensity )) * this->attractor_angular_decay_  ), 2.0));*/
+      
+        //this->convertToDecay(attractor_tmp.intensity, attractor_tmp.theta) *10 * std::exp( std::abs(attractor_tmp.theta) );
+        // attractor.theta = this->normalizeAngle(attractor_tmp.theta);
+
         // If the robot is more complex this should be addressed in a different way
 
         this->attractors_list_.push_back(attractor);
     }
 
+    this->force_attractors_ = this->attractors_list_[0];
+
+
+
     // Now sum the forces to the last one
-    for (int index_vertex = 0; index_vertex < this->attractors_list_.size(); index_vertex++) {
+    /*for (int index_vertex = 0; index_vertex < this->attractors_list_.size(); index_vertex++) {
         
         this->force_attractors_ = this->force_attractors_ + this->attractors_list_[index_vertex];
         this->force_attractors_.theta = normalizeAngle(this->force_attractors_.theta);
-    }
+    }*/
 
-    ROS_INFO("Force attractors d = %f, theta = %f", this->force_attractors_.intensity, this->force_attractors_.theta);
+    // ROS_INFO("Force attractors d = %f, theta = %f", this->force_attractors_.intensity, this->force_attractors_.theta);
 
     //this->force_attractors_.intensity = this->convertToDecay(this->force_attractors_.intensity, this->force_attractors_.theta);
     // Normalize the force intensity
@@ -391,7 +425,7 @@ void ProximityPlanner::addRawPoint(Force force) {
             force = tmp_force;
             rel_point = tmp_force;
             rel_point.theta *= -1.0f;
-            force.theta *= -1.0f;
+            force.theta     *= -1.0f;
             // TODO: check how to compose this
             // this is a simple hack to fix the center point 
             hangle = rel_point.theta;
@@ -409,8 +443,8 @@ void ProximityPlanner::addRawPoint(Force force) {
         }
 
         for (auto it = this->distance_list_[index_ver].begin(); it != this->distance_list_[index_ver].end(); it++) {
-            if (force.theta >= this->normalizeAngle(it->theta - this->visual_range_.delta_angle / 2.0f) && \
-                force.theta <  this->normalizeAngle(it->theta + this->visual_range_.delta_angle / 2.0f) ) {
+            if (rel_point.theta >= this->normalizeAngle(it->theta - this->visual_range_.delta_angle / 2.0f) && \
+                rel_point.theta <  this->normalizeAngle(it->theta + this->visual_range_.delta_angle / 2.0f) ) {
                 it->intensity = std::min(it->intensity, rel_point.intensity);
                 found = true;
             }
@@ -432,7 +466,7 @@ void ProximityPlanner::publishSideInformation() {
     msg.header.frame_id = "wcias_base_link";
 
     for (int index_ver = 0; index_ver < this->reppellors_list_.size(); index_ver++) {
-        for (auto it = this->distance_list_[index_ver].begin(); it != this->distance_list_[index_ver].end(); it++) {
+        for (auto it = this->reppellors_list_[index_ver].begin(); it != this->reppellors_list_[index_ver].end(); it++) {
             if (it->intensity < this->range_max_ && it->intensity > this->range_min_) {
                 geometry_msgs::Pose p;
                 p.position.x = rel_verts_x_[index_ver];
@@ -505,14 +539,17 @@ void ProximityPlanner::updateInternalMap() {
 
 void ProximityPlanner::computeTwist(geometry_msgs::Twist& cmd_vel) {
     cmd_vel.linear.x  = computeVlin();
-    cmd_vel.angular.z = this->final_force_.intensity;
+    cmd_vel.angular.z = this->final_force_.intensity;// * (1.0f / 500f);
 
     cmd_vel.linear.x  *= 1.1f;
     cmd_vel.angular.z *= 1.1f;
 
     cmd_vel.linear.x  = this->normalizeVelocity(cmd_vel.linear.x,  this->vel_linear_min_,  this->vel_linear_max_);
     cmd_vel.angular.z = this->normalizeVelocity(cmd_vel.angular.z, this->vel_angular_min_, this->vel_angular_max_);
+    
+    this->old_vel_ = cmd_vel.angular.z;
 }
+
 float ProximityPlanner::normalizeVelocity(float vel_a, float v_min, float v_max) {
     // More than a "normalize" this will put boundaries on the velocity 
     int current_sing(sgn(vel_a));
@@ -590,7 +627,7 @@ float ProximityPlanner::normalizeAngle(float angle) {
         if (angle < -M_PI) {
            angle = 2 * M_PI + angle;
         }else if (angle > M_PI) {
-            angle = -2 * M_PI - angle;
+            angle = -2 * M_PI + angle;
         }
     }
     return angle;
@@ -609,8 +646,9 @@ float ProximityPlanner::convertToPfs(float distance, float safe_distance) {
 
 float ProximityPlanner::convertToDecay(float distance, float theta) {
     // TODO: check this formula
+    
     float clambda = this->repellor_angular_strength_ * 
-      std::exp(-( (1.0f - this->visual_range_.safe_distance) / (distance + this->visual_range_.safe_distance)) ) / this->repellor_angular_decay_;
+      std::exp((-( (1.0f) / (distance + this->visual_range_.safe_distance) ))) /  this->repellor_angular_decay_ ;
 
     // TODO: change the 1 to the size of the robot
 
@@ -626,6 +664,12 @@ float ProximityPlanner::convertToDecay(float distance, float theta) {
     if (std::isnan(potential) == true)
       potential = 0.0f;
 
+    //float intensity = (this->visual_range_.delta_angle/2.0f) + (this->visual_range_.safe_distance) / (this->visual_range_.safe_distance + distance);
+
+    /*return this->repellor_angular_strength_ * ( theta ) * 
+          std::exp( - std::pow( ( theta ) / 
+        ( std::atan( std::tan(  intensity )) * this->repellor_angular_decay_  ), 2.0));*/
+
     return potential;
 }
 
@@ -635,7 +679,7 @@ float ProximityPlanner::computeVlin() {
 
     // TODO: check this function
 
-    std::vector<float> vel = {0.0f, -1.0, 1.0, -2.0f, 2.0f};
+    std::vector<float> vel = {0.0f};//, -2.0f, 2.0f};
 
     for (int i = 0; i < vel.size(); i++) {
         vel[i] = this->getVlin( vel[i] / (2.0f * M_PI));
