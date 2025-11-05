@@ -541,7 +541,7 @@ void ProximityPlanner::computeTwist(geometry_msgs::Twist& cmd_vel) {
     cmd_vel.linear.x  = computeVlin();
     cmd_vel.angular.z = this->final_force_.intensity;// * (1.0f / 500f);
 
-    cmd_vel.linear.x  *= 1.1f;
+    cmd_vel.linear.x  *= 1.1f; // TODO recheck the intensity
     cmd_vel.angular.z *= 1.1f;
 
     cmd_vel.linear.x  = this->normalizeVelocity(cmd_vel.linear.x,  this->vel_linear_min_,  this->vel_linear_max_);
